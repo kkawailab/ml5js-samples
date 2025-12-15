@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ml5.js サンプル集</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 60px 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-top: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .intro {
+            background: #0f3460;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 40px;
+        }
+
+        .intro h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .intro ul {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .intro li {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .intro li span {
+            font-size: 1.5rem;
+        }
+
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .section-header h2 {
+            font-size: 1.5rem;
+        }
+
+        .level-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .level-beginner { background: #27ae60; }
+        .level-intermediate { background: #f39c12; }
+        .level-advanced { background: #e74c3c; }
+
+        .sample-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .sample-card {
+            background: #16213e;
+            border-radius: 15px;
+            overflow: hidden;
+            transition: transform 0.3s, box-shadow 0.3s;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .sample-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+
+        .card-header {
+            background: #0f3460;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .card-number {
+            background: #667eea;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        .card-icon {
+            margin-left: auto;
+            font-size: 1.8rem;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .card-description {
+            color: #a0a0a0;
+            font-size: 0.95rem;
+            margin-bottom: 15px;
+        }
+
+        .card-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tag {
+            background: #0f3460;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            color: #667eea;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 40px 20px;
+            background: #0f3460;
+            margin-top: 60px;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .github-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: #667eea;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 30px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 20px;
+            transition: background 0.3s;
+        }
+
+        .github-link:hover {
+            background: #764ba2;
+        }
+
+        @media (max-width: 600px) {
+            .header h1 {
+                font-size: 1.8rem;
+            }
+            .sample-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>ml5.js サンプル集</h1>
+        <p>機械学習をブラウザで体験しよう！初心者から上級者まで、30個のインタラクティブなサンプルを収録</p>
+        <div class="badge">HTMLファイル1枚で動作</div>
+    </div>
+
+    <div class="container">
+        <div class="intro">
+            <h2>はじめる前に</h2>
+            <ul>
+                <li><span>🌐</span>モダンブラウザ（Chrome推奨）</li>
+                <li><span>📷</span>ウェブカメラ</li>
+                <li><span>🎤</span>マイク（一部サンプル）</li>
+                <li><span>⚡</span>インターネット接続</li>
+            </ul>
+        </div>
+
+        <!-- 初心者向け -->
+        <div class="section">
+            <div class="section-header">
+                <h2>初心者向け</h2>
+                <span class="level-badge level-beginner">Beginner</span>
+            </div>
+            <div class="sample-grid">
+                <a href="01_image_classifier_basic.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">01</div>
+                        <div class="card-title">Image Classifier 基本</div>
+                        <div class="card-icon">🖼️</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">MobileNetを使って画像が何かを判定する最小サンプル。機械学習の第一歩に最適です。</p>
+                        <div class="card-tags">
+                            <span class="tag">ImageClassifier</span>
+                            <span class="tag">MobileNet</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="02_image_classifier_webcam.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">02</div>
+                        <div class="card-title">Webcam リアルタイム分類</div>
+                        <div class="card-icon">📹</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">ウェブカメラの映像をリアルタイムで分類。物体を見せると即座に認識します。</p>
+                        <div class="card-tags">
+                            <span class="tag">ImageClassifier</span>
+                            <span class="tag">Webcam</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="03_bodypose_basic.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">03</div>
+                        <div class="card-title">BodyPose 基本</div>
+                        <div class="card-icon">🧍</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">体の17箇所のキーポイント（関節）を検出して表示します。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">MoveNet</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="04_bodypose_skeleton.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">04</div>
+                        <div class="card-title">BodyPose スケルトン</div>
+                        <div class="card-icon">💀</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">検出したキーポイントを線で繋いで骨格（スケルトン）として表示します。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">スケルトン</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="05_handpose_basic.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">05</div>
+                        <div class="card-title">HandPose 基本</div>
+                        <div class="card-icon">✋</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">手の21箇所のキーポイントを検出。指先や関節の位置がわかります。</p>
+                        <div class="card-tags">
+                            <span class="tag">HandPose</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="06_facemesh_basic.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">06</div>
+                        <div class="card-title">FaceMesh 基本</div>
+                        <div class="card-icon">😊</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">顔の478個のランドマークを検出。目、鼻、口などの位置を詳細に取得できます。</p>
+                        <div class="card-tags">
+                            <span class="tag">FaceMesh</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="07_sound_classifier_basic.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">07</div>
+                        <div class="card-title">Sound Classifier 基本</div>
+                        <div class="card-icon">🎤</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">マイクの音声を分類。話し声や特定の音を認識します。</p>
+                        <div class="card-tags">
+                            <span class="tag">SoundClassifier</span>
+                            <span class="tag">音声認識</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="08_bodypose_counter.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">08</div>
+                        <div class="card-title">スクワットカウンター</div>
+                        <div class="card-icon">🏋️</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">BodyPoseを使ってスクワットの回数を自動でカウントします。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">フィットネス</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="09_image_classifier_upload.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">09</div>
+                        <div class="card-title">画像アップロード分類</div>
+                        <div class="card-icon">📤</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">画像をドラッグ＆ドロップで分類。上位5件の結果をバーグラフで表示します。</p>
+                        <div class="card-tags">
+                            <span class="tag">ImageClassifier</span>
+                            <span class="tag">ファイルアップロード</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="10_facemesh_emoji.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">10</div>
+                        <div class="card-title">絵文字オーバーレイ</div>
+                        <div class="card-icon">🎭</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">顔の位置に合わせて絵文字を重ねて表示。好きな絵文字を選べます。</p>
+                        <div class="card-tags">
+                            <span class="tag">FaceMesh</span>
+                            <span class="tag">AR</span>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <!-- 中級者向け -->
+        <div class="section">
+            <div class="section-header">
+                <h2>中級者向け</h2>
+                <span class="level-badge level-intermediate">Intermediate</span>
+            </div>
+            <div class="sample-grid">
+                <a href="11_bodypose_game.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">11</div>
+                        <div class="card-title">フルーツキャッチゲーム</div>
+                        <div class="card-icon">🍎</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">手を動かして落ちてくるフルーツをキャッチ！BodyPoseを使ったシンプルなゲームです。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">ゲーム</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="12_handpose_drawing.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">12</div>
+                        <div class="card-title">手で描くお絵かき</div>
+                        <div class="card-icon">🎨</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">人差し指を立てると描画モード。空中に絵を描けます。色や太さも変更可能。</p>
+                        <div class="card-tags">
+                            <span class="tag">HandPose</span>
+                            <span class="tag">お絵かき</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="13_facemesh_filter.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">13</div>
+                        <div class="card-title">フェイスフィルター</div>
+                        <div class="card-icon">🕶️</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">サングラス、猫耳、王冠などのフィルターを顔に合わせて表示します。</p>
+                        <div class="card-tags">
+                            <span class="tag">FaceMesh</span>
+                            <span class="tag">AR</span>
+                            <span class="tag">フィルター</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="14_neural_network_classification.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">14</div>
+                        <div class="card-title">Neural Network 色分類</div>
+                        <div class="card-icon">🧠</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">RGB値から色の名前を予測するニューラルネットワークを自分で訓練します。</p>
+                        <div class="card-tags">
+                            <span class="tag">NeuralNetwork</span>
+                            <span class="tag">分類</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="15_neural_network_regression.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">15</div>
+                        <div class="card-title">Neural Network 価格予測</div>
+                        <div class="card-icon">🏠</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">面積と築年数から住宅価格を予測。回帰問題をニューラルネットワークで解きます。</p>
+                        <div class="card-tags">
+                            <span class="tag">NeuralNetwork</span>
+                            <span class="tag">回帰</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="16_bodypose_sound.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">16</div>
+                        <div class="card-title">体で音楽を奏でる</div>
+                        <div class="card-icon">🎵</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">手の位置で音程と音量を操作。体を動かして音楽を奏でましょう。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">Web Audio</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="17_handpose_gesture.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">17</div>
+                        <div class="card-title">ジェスチャー認識</div>
+                        <div class="card-icon">🤟</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">グー、チョキ、パー、いいね、指差しなどのジェスチャーを認識します。</p>
+                        <div class="card-tags">
+                            <span class="tag">HandPose</span>
+                            <span class="tag">ジェスチャー</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="18_multi_model.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">18</div>
+                        <div class="card-title">マルチモデル同時使用</div>
+                        <div class="card-icon">🔮</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">BodyPose、HandPose、FaceMeshを同時に実行。各モデルのON/OFFを切り替え可能。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">HandPose</span>
+                            <span class="tag">FaceMesh</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="19_sound_visualizer.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">19</div>
+                        <div class="card-title">音声ビジュアライザー</div>
+                        <div class="card-icon">🎧</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">音声分類と円形ビジュアライザーの組み合わせ。声に反応して美しく表示します。</p>
+                        <div class="card-tags">
+                            <span class="tag">SoundClassifier</span>
+                            <span class="tag">ビジュアライザー</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="20_image_classifier_custom_ui.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">20</div>
+                        <div class="card-title">カスタムUI 画像分類</div>
+                        <div class="card-icon">✨</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">リッチなUIの画像分類器。ライブモード、キャプチャモード、履歴機能付き。</p>
+                        <div class="card-tags">
+                            <span class="tag">ImageClassifier</span>
+                            <span class="tag">UI/UX</span>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+
+        <!-- 上級者向け -->
+        <div class="section">
+            <div class="section-header">
+                <h2>上級者向け</h2>
+                <span class="level-badge level-advanced">Advanced</span>
+            </div>
+            <div class="sample-grid">
+                <a href="21_neural_network_pose_classifier.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">21</div>
+                        <div class="card-title">カスタムポーズ分類器</div>
+                        <div class="card-icon">🤖</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">独自のポーズを登録して訓練。自分だけのポーズ認識モデルを作れます。</p>
+                        <div class="card-tags">
+                            <span class="tag">NeuralNetwork</span>
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">訓練</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="22_bodypose_fitness_tracker.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">22</div>
+                        <div class="card-title">フィットネストラッカー</div>
+                        <div class="card-icon">💪</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">複数のエクササイズに対応。回数、カロリー、フォーム品質を計測します。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">フィットネス</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="23_handpose_virtual_keyboard.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">23</div>
+                        <div class="card-title">バーチャルキーボード</div>
+                        <div class="card-icon">⌨️</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">空中に表示されたキーボードを指でタップして文字入力します。</p>
+                        <div class="card-tags">
+                            <span class="tag">HandPose</span>
+                            <span class="tag">UI</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="24_facemesh_head_pose.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">24</div>
+                        <div class="card-title">頭の向き推定</div>
+                        <div class="card-icon">🗿</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">Yaw（左右）、Pitch（上下）、Roll（傾き）を計算。3Dキューブで視覚化します。</p>
+                        <div class="card-tags">
+                            <span class="tag">FaceMesh</span>
+                            <span class="tag">3D</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="25_multi_person_tracking.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">25</div>
+                        <div class="card-title">マルチパーソントラッキング</div>
+                        <div class="card-icon">👥</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">複数人を同時に追跡し、それぞれの動きや姿勢を個別に分析します。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">トラッキング</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="26_neural_network_timeseries.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">26</div>
+                        <div class="card-title">時系列予測</div>
+                        <div class="card-icon">📈</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">過去のデータパターンを学習し、未来の値を予測するニューラルネットワーク。</p>
+                        <div class="card-tags">
+                            <span class="tag">NeuralNetwork</span>
+                            <span class="tag">時系列</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="27_pose_matching_game.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">27</div>
+                        <div class="card-title">ポーズマッチングゲーム</div>
+                        <div class="card-icon">🎮</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">画面に表示されるお題のポーズを真似してスコアを競うゲームです。</p>
+                        <div class="card-tags">
+                            <span class="tag">BodyPose</span>
+                            <span class="tag">ゲーム</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="28_handpose_sign_language.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">28</div>
+                        <div class="card-title">指文字認識</div>
+                        <div class="card-icon">🤙</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">手の形からアルファベットの指文字を認識。文字を繋げて文を作れます。</p>
+                        <div class="card-tags">
+                            <span class="tag">HandPose</span>
+                            <span class="tag">手話</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="29_ai_drawing_assistant.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">29</div>
+                        <div class="card-title">AIお絵かきアシスタント</div>
+                        <div class="card-icon">🖌️</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">描いている途中でAIが何を描いているか予測。リアルタイムでフィードバックします。</p>
+                        <div class="card-tags">
+                            <span class="tag">ImageClassifier</span>
+                            <span class="tag">お絵かき</span>
+                        </div>
+                    </div>
+                </a>
+
+                <a href="30_interactive_ai_experience.html" class="sample-card">
+                    <div class="card-header">
+                        <div class="card-number">30</div>
+                        <div class="card-title">総合AIインタラクティブ体験</div>
+                        <div class="card-icon">🌟</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-description">全モデルとエフェクトを統合した総合デモ。モード切替、パーティクル、ミラーなど多彩な機能。</p>
+                        <div class="card-tags">
+                            <span class="tag">全モデル</span>
+                            <span class="tag">エフェクト</span>
+                            <span class="tag">統合</span>
+                        </div>
+                    </div>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Powered by <a href="https://ml5js.org/" target="_blank">ml5.js</a> & <a href="https://www.tensorflow.org/js" target="_blank">TensorFlow.js</a></p>
+        <a href="https://github.com/kkawailab/ml5js-samples" class="github-link" target="_blank">
+            <svg height="20" width="20" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+            </svg>
+            GitHub でソースを見る
+        </a>
+    </div>
+</body>
+</html>
