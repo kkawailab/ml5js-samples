@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>27 - ポーズマッチングゲーム</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #0d1117; color: white; overflow: hidden; }
+        .game-container { display: flex; height: 100vh; }
+        .camera-area { flex: 2; position: relative; }
+        canvas { width: 100%; height: 100%; object-fit: cover; }
+        .target-pose { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 15px; text-align: center; }
+        .target-emoji { font-size: 100px; }
+        .target-name { font-size: 18px; margin-top: 10px; }
+        .sidebar { width: 280px; background: #161b22; padding: 20px; display: flex; flex-direction: column; }
+        .score-display { text-align: center; padding: 20px; background: #21262d; border-radius: 15px; margin-bottom: 20px; }
+        .score-value { font-size: 48px; font-weight: bold; color: #58a6ff; }
+        .score-label { font-size: 14px; color: #8b949e; }
+        .timer-display { text-align: center; padding: 15px; background: #21262d; border-radius: 15px; margin-bottom: 20px; }
+        .timer-value { font-size: 36px; font-weight: bold; color: #f85149; }
+        .match-meter { margin: 20px 0; }
+        .meter-label { font-size: 14px; color: #8b949e; margin-bottom: 5px; }
+        .meter-bar { height: 30px; background: #30363d; border-radius: 15px; overflow: hidden; }
+        .meter-fill { height: 100%; transition: width 0.2s, background 0.2s; }
+        .combo-display { text-align: center; font-size: 24px; font-weight: bold; color: #f9ca24; min-height: 40px; }
+        button { padding: 15px 30px; border: none; border-radius: 10px; cursor: pointer; font-size: 16px; width: 100%; margin-top: auto; }
+        .start-btn { background: #238636; color: white; }
+        .start-btn:hover { background: #2ea043; }
+        #gameOver { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 100; justify-content: center; align-items: center; }
+        .game-over-content { text-align: center; }
+        .final-score { font-size: 72px; font-weight: bold; color: #58a6ff; }
+        #countdown { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 200px; font-weight: bold; color: #58a6ff; z-index: 50; text-shadow: 0 0 50px #58a6ff; }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="camera-area">
+            <canvas id="canvas"></canvas>
+            <div class="target-pose">
+                <div class="target-emoji" id="targetEmoji">🧘</div>
+                <div class="target-name" id="targetName">準備中...</div>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="score-display">
+                <div class="score-value" id="score">0</div>
+                <div class="score-label">スコア</div>
+            </div>
+
+            <div class="timer-display">
+                <div class="timer-value" id="timer">60</div>
+                <div class="score-label">残り時間</div>
+            </div>
+
+            <div class="match-meter">
+                <div class="meter-label">マッチ度</div>
+                <div class="meter-bar">
+                    <div class="meter-fill" id="matchMeter" style="width: 0%; background: #f85149;"></div>
+                </div>
+            </div>
+
+            <div class="combo-display" id="combo"></div>
+
+            <button class="start-btn" id="startBtn" onclick="startGame()">ゲーム開始</button>
+        </div>
+    </div>
+
+    <div id="countdown">3</div>
+
+    <div id="gameOver">
+        <div class="game-over-content">
+            <h1>ゲーム終了！</h1>
+            <div class="final-score" id="finalScore">0</div>
+            <p>最終スコア</p>
+            <button class="start-btn" onclick="restartGame()" style="width: auto; padding: 15px 50px;">もう一度プレイ</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const targetEmoji = document.getElementById('targetEmoji');
+        const targetName = document.getElementById('targetName');
+        const scoreDisplay = document.getElementById('score');
+        const timerDisplay = document.getElementById('timer');
+        const matchMeter = document.getElementById('matchMeter');
+        const comboDisplay = document.getElementById('combo');
+        const startBtn = document.getElementById('startBtn');
+        const countdownDiv = document.getElementById('countdown');
+        const gameOverDiv = document.getElementById('gameOver');
+        const finalScoreDiv = document.getElementById('finalScore');
+
+        let video;
+        let bodyPose;
+        let poses = [];
+        let gameRunning = false;
+        let score = 0;
+        let timeLeft = 60;
+        let combo = 0;
+        let currentPose = null;
+        let matchProgress = 0;
+
+        const targetPoses = [
+            { name: '両手を上げる', emoji: '🙌', check: checkArmsUp },
+            { name: 'Tポーズ', emoji: '✝️', check: checkTPose },
+            { name: 'スクワット', emoji: '🏋️', check: checkSquat },
+            { name: '片足立ち（左）', emoji: '🦩', check: checkLeftLegUp },
+            { name: '片足立ち（右）', emoji: '🦩', check: checkRightLegUp },
+            { name: '両手を前に', emoji: '🧟', check: checkArmsForward },
+            { name: '手を振る', emoji: '👋', check: checkWaving }
+        ];
+
+        async function setup() {
+            video = document.createElement('video');
+            canvas.width = 640;
+            canvas.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet');
+            targetName.textContent = 'スタートを押してください';
+
+            detectPose();
+        }
+
+        async function detectPose() {
+            poses = await bodyPose.detect(video);
+            if (gameRunning) {
+                checkPoseMatch();
+            }
+            draw();
+            requestAnimationFrame(detectPose);
+        }
+
+        function getKeypoint(name) {
+            if (poses.length === 0) return null;
+            const kp = poses[0].keypoints.find(k => k.name === name);
+            return kp && kp.confidence > 0.3 ? kp : null;
+        }
+
+        // ポーズチェック関数
+        function checkArmsUp() {
+            const lw = getKeypoint('left_wrist');
+            const rw = getKeypoint('right_wrist');
+            const ls = getKeypoint('left_shoulder');
+            if (!lw || !rw || !ls) return 0;
+            const bothUp = lw.y < ls.y - 50 && rw.y < ls.y - 50;
+            return bothUp ? 1 : Math.max(0, 1 - (Math.max(lw.y, rw.y) - (ls.y - 50)) / 100);
+        }
+
+        function checkTPose() {
+            const lw = getKeypoint('left_wrist');
+            const rw = getKeypoint('right_wrist');
+            const ls = getKeypoint('left_shoulder');
+            const rs = getKeypoint('right_shoulder');
+            if (!lw || !rw || !ls || !rs) return 0;
+            const armsLevel = Math.abs(lw.y - ls.y) < 50 && Math.abs(rw.y - rs.y) < 50;
+            const armsWide = lw.x < ls.x - 100 && rw.x > rs.x + 100;
+            return (armsLevel && armsWide) ? 1 : 0.3;
+        }
+
+        function checkSquat() {
+            const lh = getKeypoint('left_hip');
+            const lk = getKeypoint('left_knee');
+            if (!lh || !lk) return 0;
+            const diff = lk.y - lh.y;
+            return diff < 80 ? 1 : Math.max(0, 1 - (diff - 80) / 50);
+        }
+
+        function checkLeftLegUp() {
+            const lk = getKeypoint('left_knee');
+            const lh = getKeypoint('left_hip');
+            const ra = getKeypoint('right_ankle');
+            if (!lk || !lh || !ra) return 0;
+            return lk.y < lh.y + 30 ? 1 : 0;
+        }
+
+        function checkRightLegUp() {
+            const rk = getKeypoint('right_knee');
+            const rh = getKeypoint('right_hip');
+            const la = getKeypoint('left_ankle');
+            if (!rk || !rh || !la) return 0;
+            return rk.y < rh.y + 30 ? 1 : 0;
+        }
+
+        function checkArmsForward() {
+            const lw = getKeypoint('left_wrist');
+            const rw = getKeypoint('right_wrist');
+            const ls = getKeypoint('left_shoulder');
+            if (!lw || !rw || !ls) return 0;
+            const armsLevel = Math.abs(lw.y - ls.y) < 60 && Math.abs(rw.y - ls.y) < 60;
+            return armsLevel ? 1 : 0;
+        }
+
+        function checkWaving() {
+            const rw = getKeypoint('right_wrist');
+            const rs = getKeypoint('right_shoulder');
+            if (!rw || !rs) return 0;
+            return rw.y < rs.y && rw.x > rs.x ? 1 : 0;
+        }
+
+        function checkPoseMatch() {
+            if (!currentPose) return;
+
+            const match = currentPose.check();
+            matchProgress = match;
+
+            matchMeter.style.width = `${match * 100}%`;
+            matchMeter.style.background = match > 0.8 ? '#4ecca3' : match > 0.5 ? '#f9ca24' : '#f85149';
+
+            if (match >= 0.9) {
+                // ポーズ成功
+                combo++;
+                const points = 100 * (1 + combo * 0.1);
+                score += Math.floor(points);
+                scoreDisplay.textContent = score;
+
+                comboDisplay.textContent = combo > 1 ? `🔥 ${combo} コンボ!` : '';
+                comboDisplay.style.animation = 'none';
+                comboDisplay.offsetHeight;
+                comboDisplay.style.animation = 'pulse 0.5s';
+
+                nextPose();
+            }
+        }
+
+        function nextPose() {
+            const available = targetPoses.filter(p => p !== currentPose);
+            currentPose = available[Math.floor(Math.random() * available.length)];
+            targetEmoji.textContent = currentPose.emoji;
+            targetName.textContent = currentPose.name;
+            matchProgress = 0;
+            matchMeter.style.width = '0%';
+        }
+
+        async function startGame() {
+            startBtn.style.display = 'none';
+
+            // カウントダウン
+            countdownDiv.style.display = 'block';
+            for (let i = 3; i > 0; i--) {
+                countdownDiv.textContent = i;
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            countdownDiv.textContent = 'GO!';
+            await new Promise(r => setTimeout(r, 500));
+            countdownDiv.style.display = 'none';
+
+            // ゲーム開始
+            gameRunning = true;
+            score = 0;
+            combo = 0;
+            timeLeft = 60;
+            scoreDisplay.textContent = '0';
+            comboDisplay.textContent = '';
+
+            nextPose();
+
+            // タイマー
+            const timer = setInterval(() => {
+                timeLeft--;
+                timerDisplay.textContent = timeLeft;
+
+                if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            gameRunning = false;
+            finalScoreDiv.textContent = score;
+            gameOverDiv.style.display = 'flex';
+        }
+
+        function restartGame() {
+            gameOverDiv.style.display = 'none';
+            startBtn.style.display = 'block';
+            targetEmoji.textContent = '🧘';
+            targetName.textContent = 'スタートを押してください';
+            timerDisplay.textContent = '60';
+            matchMeter.style.width = '0%';
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (poses.length > 0) {
+                const pose = poses[0];
+                const color = matchProgress > 0.8 ? '#4ecca3' : matchProgress > 0.5 ? '#f9ca24' : '#58a6ff';
+
+                // スケルトン
+                const connections = [
+                    ['left_shoulder', 'right_shoulder'],
+                    ['left_shoulder', 'left_elbow'], ['left_elbow', 'left_wrist'],
+                    ['right_shoulder', 'right_elbow'], ['right_elbow', 'right_wrist'],
+                    ['left_shoulder', 'left_hip'], ['right_shoulder', 'right_hip'],
+                    ['left_hip', 'right_hip'],
+                    ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
+                    ['right_hip', 'right_knee'], ['right_knee', 'right_ankle']
+                ];
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 4;
+
+                for (let [start, end] of connections) {
+                    const s = pose.keypoints.find(k => k.name === start);
+                    const e = pose.keypoints.find(k => k.name === end);
+                    if (s && e && s.confidence > 0.3 && e.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.moveTo(canvas.width - s.x, s.y);
+                        ctx.lineTo(canvas.width - e.x, e.y);
+                        ctx.stroke();
+                    }
+                }
+
+                for (let kp of pose.keypoints) {
+                    if (kp.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width - kp.x, kp.y, 8, 0, 2 * Math.PI);
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

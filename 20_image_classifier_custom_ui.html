@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>20 - Image Classifier カスタムUI</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; color: white; }
+        .app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { text-align: center; padding: 20px 0; }
+        header h1 { font-size: 28px; margin: 0; background: linear-gradient(90deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+
+        .main-container { display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
+        @media (max-width: 900px) { .main-container { grid-template-columns: 1fr; } }
+
+        .video-section { background: #0f3460; border-radius: 20px; padding: 20px; position: relative; }
+        video, canvas { width: 100%; border-radius: 15px; display: block; }
+        .capture-btn { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 70px; height: 70px; border-radius: 50%; border: 4px solid white; background: rgba(255,255,255,0.2); cursor: pointer; transition: all 0.3s; }
+        .capture-btn:hover { background: rgba(255,255,255,0.4); transform: translateX(-50%) scale(1.1); }
+        .capture-btn::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 50px; height: 50px; border-radius: 50%; background: white; }
+
+        .sidebar { display: flex; flex-direction: column; gap: 15px; }
+
+        .panel { background: #0f3460; border-radius: 15px; padding: 20px; }
+        .panel-title { font-size: 14px; color: #888; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 1px; }
+
+        .result-card { background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 12px; padding: 20px; text-align: center; }
+        .result-label { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+        .result-confidence { font-size: 48px; font-weight: bold; }
+
+        .predictions-list { display: flex; flex-direction: column; gap: 10px; }
+        .prediction-item { display: flex; align-items: center; gap: 10px; }
+        .prediction-rank { width: 25px; height: 25px; border-radius: 50%; background: #16213e; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+        .prediction-info { flex: 1; }
+        .prediction-label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+        .prediction-bar { height: 6px; background: #16213e; border-radius: 3px; margin-top: 4px; overflow: hidden; }
+        .prediction-fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); border-radius: 3px; transition: width 0.5s; }
+        .prediction-percent { font-size: 12px; color: #888; min-width: 45px; text-align: right; }
+
+        .history-section { max-height: 200px; overflow-y: auto; }
+        .history-item { display: flex; gap: 10px; padding: 10px; background: #16213e; border-radius: 10px; margin-bottom: 10px; }
+        .history-thumb { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; }
+        .history-info { flex: 1; }
+        .history-label { font-size: 14px; font-weight: bold; }
+        .history-time { font-size: 11px; color: #666; }
+
+        .mode-switch { display: flex; gap: 5px; margin-bottom: 15px; }
+        .mode-btn { flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; background: #16213e; color: #888; transition: all 0.3s; }
+        .mode-btn.active { background: #667eea; color: white; }
+
+        #status { text-align: center; padding: 10px; color: #4ecca3; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header>
+            <h1>🤖 AI Image Classifier</h1>
+        </header>
+
+        <div id="status">モデルを読み込み中...</div>
+
+        <div class="main-container">
+            <div class="video-section">
+                <div class="mode-switch">
+                    <button class="mode-btn active" onclick="setMode('live')">ライブ分類</button>
+                    <button class="mode-btn" onclick="setMode('capture')">キャプチャモード</button>
+                </div>
+                <video id="video" autoplay playsinline></video>
+                <canvas id="canvas" style="display: none;"></canvas>
+                <button class="capture-btn" id="captureBtn" style="display: none;" onclick="capture()"></button>
+            </div>
+
+            <div class="sidebar">
+                <div class="panel">
+                    <div class="panel-title">トップ結果</div>
+                    <div class="result-card">
+                        <div class="result-label" id="topLabel">-</div>
+                        <div class="result-confidence" id="topConfidence">-%</div>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">予測一覧</div>
+                    <div class="predictions-list" id="predictionsList">
+                        <!-- 動的に生成 -->
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">履歴</div>
+                    <div class="history-section" id="historySection">
+                        <!-- 動的に生成 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const captureBtn = document.getElementById('captureBtn');
+        const statusDiv = document.getElementById('status');
+        const topLabel = document.getElementById('topLabel');
+        const topConfidence = document.getElementById('topConfidence');
+        const predictionsList = document.getElementById('predictionsList');
+        const historySection = document.getElementById('historySection');
+        const modeBtns = document.querySelectorAll('.mode-btn');
+
+        let classifier;
+        let mode = 'live';
+        let history = [];
+
+        async function setup() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+
+            canvas.width = video.width = 640;
+            canvas.height = video.height = 480;
+
+            classifier = await ml5.imageClassifier('MobileNet');
+            statusDiv.textContent = '準備完了！';
+            setTimeout(() => statusDiv.style.display = 'none', 2000);
+
+            classifyLive();
+        }
+
+        function setMode(newMode) {
+            mode = newMode;
+            modeBtns.forEach(btn => {
+                btn.classList.toggle('active', btn.textContent.includes(mode === 'live' ? 'ライブ' : 'キャプチャ'));
+            });
+
+            if (mode === 'live') {
+                video.style.display = 'block';
+                canvas.style.display = 'none';
+                captureBtn.style.display = 'none';
+                classifyLive();
+            } else {
+                captureBtn.style.display = 'block';
+            }
+        }
+
+        async function classifyLive() {
+            if (mode !== 'live') return;
+
+            const results = await classifier.classify(video, 5);
+            updateResults(results);
+
+            requestAnimationFrame(classifyLive);
+        }
+
+        async function capture() {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            video.style.display = 'none';
+            canvas.style.display = 'block';
+
+            const results = await classifier.classify(canvas, 5);
+            updateResults(results);
+
+            // 履歴に追加
+            addToHistory(canvas.toDataURL(), results[0]);
+
+            // 3秒後にライブに戻る
+            setTimeout(() => {
+                video.style.display = 'block';
+                canvas.style.display = 'none';
+            }, 3000);
+        }
+
+        function updateResults(results) {
+            // トップ結果
+            topLabel.textContent = results[0].label.split(',')[0];
+            topConfidence.textContent = `${(results[0].confidence * 100).toFixed(1)}%`;
+
+            // 予測一覧
+            predictionsList.innerHTML = results.map((r, i) => `
+                <div class="prediction-item">
+                    <div class="prediction-rank">${i + 1}</div>
+                    <div class="prediction-info">
+                        <div class="prediction-label" title="${r.label}">${r.label.split(',')[0]}</div>
+                        <div class="prediction-bar">
+                            <div class="prediction-fill" style="width: ${r.confidence * 100}%"></div>
+                        </div>
+                    </div>
+                    <div class="prediction-percent">${(r.confidence * 100).toFixed(1)}%</div>
+                </div>
+            `).join('');
+        }
+
+        function addToHistory(imageData, result) {
+            const time = new Date().toLocaleTimeString();
+            history.unshift({ imageData, label: result.label.split(',')[0], confidence: result.confidence, time });
+
+            if (history.length > 10) history.pop();
+
+            historySection.innerHTML = history.map(h => `
+                <div class="history-item">
+                    <img src="${h.imageData}" class="history-thumb">
+                    <div class="history-info">
+                        <div class="history-label">${h.label}</div>
+                        <div class="history-time">${h.time} - ${(h.confidence * 100).toFixed(1)}%</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        setup();
+    </script>
+</body>
+</html>

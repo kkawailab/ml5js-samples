@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 - BodyPose スケルトン描画</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #1a1a2e; color: white; }
+        canvas { border-radius: 10px; border: 3px solid #0f3460; }
+    </style>
+</head>
+<body>
+    <h1>BodyPose - スケルトン描画</h1>
+    <p>骨格を線で繋いで表示します</p>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let video;
+        let bodyPose;
+        let poses = [];
+
+        // スケルトンの接続定義
+        const connections = [
+            ['left_ear', 'left_eye'],
+            ['left_eye', 'nose'],
+            ['nose', 'right_eye'],
+            ['right_eye', 'right_ear'],
+            ['left_shoulder', 'right_shoulder'],
+            ['left_shoulder', 'left_elbow'],
+            ['left_elbow', 'left_wrist'],
+            ['right_shoulder', 'right_elbow'],
+            ['right_elbow', 'right_wrist'],
+            ['left_shoulder', 'left_hip'],
+            ['right_shoulder', 'right_hip'],
+            ['left_hip', 'right_hip'],
+            ['left_hip', 'left_knee'],
+            ['left_knee', 'left_ankle'],
+            ['right_hip', 'right_knee'],
+            ['right_knee', 'right_ankle']
+        ];
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+            canvas.width = 640;
+            canvas.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet');
+            detectPose();
+        }
+
+        async function detectPose() {
+            poses = await bodyPose.detect(video);
+            draw();
+            requestAnimationFrame(detectPose);
+        }
+
+        function getKeypoint(pose, name) {
+            return pose.keypoints.find(k => k.name === name);
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (poses.length > 0) {
+                const pose = poses[0];
+
+                // スケルトン線を描画
+                ctx.strokeStyle = '#00ffff';
+                ctx.lineWidth = 4;
+
+                for (let [startName, endName] of connections) {
+                    const start = getKeypoint(pose, startName);
+                    const end = getKeypoint(pose, endName);
+
+                    if (start && end && start.confidence > 0.3 && end.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.moveTo(canvas.width - start.x, start.y);
+                        ctx.lineTo(canvas.width - end.x, end.y);
+                        ctx.stroke();
+                    }
+                }
+
+                // キーポイントを描画
+                for (let keypoint of pose.keypoints) {
+                    if (keypoint.confidence > 0.3) {
+                        const x = canvas.width - keypoint.x;
+                        ctx.beginPath();
+                        ctx.arc(x, keypoint.y, 6, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#ff00ff';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

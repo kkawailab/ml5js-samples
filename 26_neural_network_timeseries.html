@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>26 - Neural Network 時系列予測</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #0d1117; color: white; text-align: center; }
+        .container { max-width: 900px; margin: 0 auto; }
+        canvas { background: #161b22; border-radius: 15px; margin: 20px 0; }
+        .panel { background: #161b22; padding: 20px; border-radius: 15px; margin: 20px 0; text-align: left; }
+        .panel h3 { margin-top: 0; color: #58a6ff; }
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0; justify-content: center; }
+        button { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; transition: all 0.3s; }
+        .primary { background: #238636; color: white; }
+        .secondary { background: #21262d; color: white; }
+        .primary:hover { background: #2ea043; }
+        .secondary:hover { background: #30363d; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        select { padding: 12px; border-radius: 8px; background: #21262d; color: white; border: none; font-size: 14px; }
+        #status { color: #4ecca3; margin: 15px 0; min-height: 20px; }
+        .prediction-display { font-size: 24px; padding: 20px; background: #21262d; border-radius: 10px; margin: 20px 0; }
+        .prediction-value { font-size: 48px; font-weight: bold; color: #58a6ff; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+        .stat-card { background: #21262d; padding: 15px; border-radius: 10px; text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #4ecca3; }
+        .stat-label { font-size: 12px; color: #8b949e; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>時系列予測</h1>
+        <p>過去のデータから未来の値を予測するニューラルネットワーク</p>
+
+        <div class="controls">
+            <select id="dataType">
+                <option value="sine">サイン波</option>
+                <option value="random_walk">ランダムウォーク</option>
+                <option value="trend">トレンド+ノイズ</option>
+                <option value="seasonal">季節変動</option>
+            </select>
+            <button class="secondary" onclick="generateData()">データ生成</button>
+            <button class="primary" id="trainBtn" onclick="trainModel()">訓練開始</button>
+            <button class="secondary" id="predictBtn" onclick="predict()" disabled>予測実行</button>
+        </div>
+
+        <canvas id="canvas" width="860" height="300"></canvas>
+
+        <div id="status">データを生成してください</div>
+
+        <div class="prediction-display">
+            <div>次の値の予測</div>
+            <div class="prediction-value" id="prediction">-</div>
+        </div>
+
+        <div class="panel">
+            <h3>統計情報</h3>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="dataPoints">0</div>
+                    <div class="stat-label">データ点数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="trainLoss">-</div>
+                    <div class="stat-label">訓練損失</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="accuracy">-</div>
+                    <div class="stat-label">精度</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="epochs">0</div>
+                    <div class="stat-label">エポック</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const dataTypeSelect = document.getElementById('dataType');
+        const trainBtn = document.getElementById('trainBtn');
+        const predictBtn = document.getElementById('predictBtn');
+        const status = document.getElementById('status');
+        const predictionDiv = document.getElementById('prediction');
+        const dataPointsDiv = document.getElementById('dataPoints');
+        const trainLossDiv = document.getElementById('trainLoss');
+        const accuracyDiv = document.getElementById('accuracy');
+        const epochsDiv = document.getElementById('epochs');
+
+        let nn;
+        let data = [];
+        let predictions = [];
+        const sequenceLength = 10;
+
+        function initNN() {
+            const options = {
+                inputs: sequenceLength,
+                outputs: 1,
+                task: 'regression',
+                layers: [
+                    { type: 'dense', units: 32, activation: 'relu' },
+                    { type: 'dense', units: 16, activation: 'relu' },
+                    { type: 'dense', units: 1, activation: 'linear' }
+                ]
+            };
+            nn = ml5.neuralNetwork(options);
+        }
+
+        function generateData() {
+            const type = dataTypeSelect.value;
+            data = [];
+            predictions = [];
+            const length = 100;
+
+            switch (type) {
+                case 'sine':
+                    for (let i = 0; i < length; i++) {
+                        data.push(Math.sin(i * 0.1) * 0.5 + 0.5);
+                    }
+                    break;
+
+                case 'random_walk':
+                    let value = 0.5;
+                    for (let i = 0; i < length; i++) {
+                        value += (Math.random() - 0.5) * 0.1;
+                        value = Math.max(0, Math.min(1, value));
+                        data.push(value);
+                    }
+                    break;
+
+                case 'trend':
+                    for (let i = 0; i < length; i++) {
+                        data.push(i / length * 0.5 + Math.random() * 0.2 + 0.25);
+                    }
+                    break;
+
+                case 'seasonal':
+                    for (let i = 0; i < length; i++) {
+                        const seasonal = Math.sin(i * 0.3) * 0.3;
+                        const trend = i / length * 0.3;
+                        const noise = (Math.random() - 0.5) * 0.1;
+                        data.push(seasonal + trend + noise + 0.3);
+                    }
+                    break;
+            }
+
+            // ニューラルネットワークを再初期化
+            initNN();
+
+            // 訓練データを準備
+            for (let i = 0; i < data.length - sequenceLength; i++) {
+                const inputs = data.slice(i, i + sequenceLength);
+                const output = data[i + sequenceLength];
+                nn.addData(inputs, [output]);
+            }
+
+            dataPointsDiv.textContent = data.length;
+            trainLossDiv.textContent = '-';
+            accuracyDiv.textContent = '-';
+            epochsDiv.textContent = '0';
+            predictionDiv.textContent = '-';
+            predictBtn.disabled = true;
+
+            status.textContent = `${data.length}点のデータを生成しました。訓練を開始してください`;
+            drawChart();
+        }
+
+        async function trainModel() {
+            if (data.length < sequenceLength + 10) {
+                status.textContent = 'データが不足しています';
+                return;
+            }
+
+            trainBtn.disabled = true;
+            status.textContent = '訓練中...';
+
+            nn.normalizeData();
+
+            let finalLoss = 0;
+            await nn.train({ epochs: 100 }, (epoch, loss) => {
+                if (epoch % 10 === 0) {
+                    status.textContent = `訓練中... エポック: ${epoch}`;
+                    epochsDiv.textContent = epoch;
+                }
+                finalLoss = loss.loss;
+            });
+
+            trainLossDiv.textContent = finalLoss.toFixed(4);
+            epochsDiv.textContent = '100';
+
+            // 訓練データでの精度を計算
+            await calculateAccuracy();
+
+            trainBtn.disabled = false;
+            predictBtn.disabled = false;
+            status.textContent = '訓練完了！予測を実行できます';
+        }
+
+        async function calculateAccuracy() {
+            predictions = [];
+            let totalError = 0;
+
+            for (let i = sequenceLength; i < data.length; i++) {
+                const inputs = data.slice(i - sequenceLength, i);
+                const result = await nn.predict(inputs);
+                const predicted = result[0].value;
+                predictions.push(predicted);
+                totalError += Math.abs(data[i] - predicted);
+            }
+
+            const avgError = totalError / predictions.length;
+            const accuracy = Math.max(0, (1 - avgError) * 100).toFixed(1);
+            accuracyDiv.textContent = `${accuracy}%`;
+
+            drawChart();
+        }
+
+        async function predict() {
+            // 最後のsequenceLength個のデータを使って予測
+            const inputs = data.slice(-sequenceLength);
+            const result = await nn.predict(inputs);
+            const nextValue = result[0].value;
+
+            predictionDiv.textContent = nextValue.toFixed(4);
+            predictionDiv.style.color = nextValue > data[data.length - 1] ? '#4ecca3' : '#f85149';
+
+            // 予測値をデータに追加して描画
+            data.push(nextValue);
+            predictions.push(nextValue);
+            dataPointsDiv.textContent = data.length;
+
+            drawChart();
+            status.textContent = '予測完了！次の値を予測しました';
+        }
+
+        function drawChart() {
+            ctx.fillStyle = '#161b22';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (data.length === 0) return;
+
+            const padding = 40;
+            const chartWidth = canvas.width - padding * 2;
+            const chartHeight = canvas.height - padding * 2;
+
+            // グリッド線
+            ctx.strokeStyle = '#30363d';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 5; i++) {
+                const y = padding + (chartHeight / 5) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(canvas.width - padding, y);
+                ctx.stroke();
+
+                ctx.fillStyle = '#8b949e';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'right';
+                ctx.fillText((1 - i / 5).toFixed(1), padding - 10, y + 4);
+            }
+
+            // 実際のデータ
+            ctx.strokeStyle = '#58a6ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < data.length; i++) {
+                const x = padding + (i / (data.length - 1)) * chartWidth;
+                const y = padding + (1 - data[i]) * chartHeight;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // 予測データ
+            if (predictions.length > 0) {
+                ctx.strokeStyle = '#f85149';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                const startIdx = sequenceLength;
+                for (let i = 0; i < predictions.length; i++) {
+                    const x = padding + ((startIdx + i) / (data.length - 1)) * chartWidth;
+                    const y = padding + (1 - predictions[i]) * chartHeight;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 凡例
+            ctx.fillStyle = '#58a6ff';
+            ctx.fillRect(canvas.width - 150, 20, 15, 15);
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'left';
+            ctx.fillText('実際の値', canvas.width - 130, 32);
+
+            ctx.fillStyle = '#f85149';
+            ctx.fillRect(canvas.width - 150, 45, 15, 15);
+            ctx.fillStyle = 'white';
+            ctx.fillText('予測値', canvas.width - 130, 57);
+        }
+
+        // 初期化
+        initNN();
+        drawChart();
+    </script>
+</body>
+</html>

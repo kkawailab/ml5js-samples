@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>17 - HandPose ジェスチャー認識</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #2c3e50; color: white; }
+        .container { display: flex; justify-content: center; gap: 30px; flex-wrap: wrap; }
+        canvas { border-radius: 15px; }
+        .gesture-panel { background: #34495e; padding: 25px; border-radius: 15px; min-width: 250px; }
+        .gesture { font-size: 72px; margin: 20px 0; }
+        .gesture-name { font-size: 28px; font-weight: bold; color: #3498db; }
+        .gesture-list { text-align: left; margin-top: 20px; }
+        .gesture-item { padding: 10px; margin: 5px 0; border-radius: 8px; display: flex; align-items: center; gap: 15px; }
+        .gesture-item.active { background: #3498db; }
+        .gesture-emoji { font-size: 30px; }
+        #status { margin-top: 15px; color: #95a5a6; }
+    </style>
+</head>
+<body>
+    <h1>ジェスチャー認識</h1>
+    <p>手のジェスチャーを認識します</p>
+
+    <div class="container">
+        <canvas id="canvas"></canvas>
+
+        <div class="gesture-panel">
+            <div class="gesture" id="gestureEmoji">✋</div>
+            <div class="gesture-name" id="gestureName">パー</div>
+
+            <div class="gesture-list">
+                <div class="gesture-item" data-gesture="rock">
+                    <span class="gesture-emoji">✊</span>
+                    <span>グー</span>
+                </div>
+                <div class="gesture-item" data-gesture="scissors">
+                    <span class="gesture-emoji">✌️</span>
+                    <span>チョキ</span>
+                </div>
+                <div class="gesture-item" data-gesture="paper">
+                    <span class="gesture-emoji">✋</span>
+                    <span>パー</span>
+                </div>
+                <div class="gesture-item" data-gesture="thumbsup">
+                    <span class="gesture-emoji">👍</span>
+                    <span>いいね</span>
+                </div>
+                <div class="gesture-item" data-gesture="pointing">
+                    <span class="gesture-emoji">👆</span>
+                    <span>指差し</span>
+                </div>
+            </div>
+
+            <div id="status">読み込み中...</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const gestureEmoji = document.getElementById('gestureEmoji');
+        const gestureName = document.getElementById('gestureName');
+        const status = document.getElementById('status');
+        const gestureItems = document.querySelectorAll('.gesture-item');
+
+        canvas.width = 640;
+        canvas.height = 480;
+
+        let video;
+        let handPose;
+        let hands = [];
+
+        const gestures = {
+            rock: { emoji: '✊', name: 'グー' },
+            scissors: { emoji: '✌️', name: 'チョキ' },
+            paper: { emoji: '✋', name: 'パー' },
+            thumbsup: { emoji: '👍', name: 'いいね' },
+            pointing: { emoji: '👆', name: '指差し' },
+            unknown: { emoji: '❓', name: '不明' }
+        };
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            handPose = await ml5.handPose();
+            status.textContent = '準備完了！手をかざしてください';
+
+            detectHands();
+        }
+
+        async function detectHands() {
+            hands = await handPose.detect(video);
+            const gesture = recognizeGesture();
+            updateDisplay(gesture);
+            draw();
+            requestAnimationFrame(detectHands);
+        }
+
+        function isFingerExtended(hand, tipIndex, pipIndex) {
+            const tip = hand.keypoints[tipIndex];
+            const pip = hand.keypoints[pipIndex];
+            const mcp = hand.keypoints[pipIndex - 1];
+
+            // 指先がPIPより上（Y座標が小さい）なら伸びている
+            return tip.y < pip.y - 20;
+        }
+
+        function isThumbExtended(hand) {
+            const tip = hand.keypoints[4];
+            const ip = hand.keypoints[3];
+            const mcp = hand.keypoints[2];
+
+            // 親指は横方向の伸びをチェック
+            const dist = Math.abs(tip.x - mcp.x);
+            return dist > 40;
+        }
+
+        function recognizeGesture() {
+            if (hands.length === 0) return 'unknown';
+
+            const hand = hands[0];
+
+            const thumb = isThumbExtended(hand);
+            const index = isFingerExtended(hand, 8, 6);
+            const middle = isFingerExtended(hand, 12, 10);
+            const ring = isFingerExtended(hand, 16, 14);
+            const pinky = isFingerExtended(hand, 20, 18);
+
+            // グー: すべての指が閉じている
+            if (!thumb && !index && !middle && !ring && !pinky) {
+                return 'rock';
+            }
+
+            // パー: すべての指が開いている
+            if (index && middle && ring && pinky) {
+                return 'paper';
+            }
+
+            // チョキ: 人差し指と中指だけ開いている
+            if (index && middle && !ring && !pinky) {
+                return 'scissors';
+            }
+
+            // いいね: 親指だけ立っている
+            if (thumb && !index && !middle && !ring && !pinky) {
+                return 'thumbsup';
+            }
+
+            // 指差し: 人差し指だけ立っている
+            if (!thumb && index && !middle && !ring && !pinky) {
+                return 'pointing';
+            }
+
+            return 'unknown';
+        }
+
+        function updateDisplay(gesture) {
+            const g = gestures[gesture];
+            gestureEmoji.textContent = g.emoji;
+            gestureName.textContent = g.name;
+
+            gestureItems.forEach(item => {
+                if (item.dataset.gesture === gesture) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (hands.length > 0) {
+                const hand = hands[0];
+
+                // 骨格を描画
+                const fingerConnections = [
+                    [0, 1, 2, 3, 4],
+                    [0, 5, 6, 7, 8],
+                    [0, 9, 10, 11, 12],
+                    [0, 13, 14, 15, 16],
+                    [0, 17, 18, 19, 20]
+                ];
+
+                ctx.strokeStyle = '#3498db';
+                ctx.lineWidth = 3;
+
+                for (let finger of fingerConnections) {
+                    ctx.beginPath();
+                    for (let i = 0; i < finger.length; i++) {
+                        const kp = hand.keypoints[finger[i]];
+                        const x = canvas.width - kp.x;
+                        if (i === 0) ctx.moveTo(x, kp.y);
+                        else ctx.lineTo(x, kp.y);
+                    }
+                    ctx.stroke();
+                }
+
+                // キーポイントを描画
+                for (let i = 0; i < hand.keypoints.length; i++) {
+                    const kp = hand.keypoints[i];
+                    const x = canvas.width - kp.x;
+                    const isTip = [4, 8, 12, 16, 20].includes(i);
+
+                    ctx.beginPath();
+                    ctx.arc(x, kp.y, isTip ? 10 : 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = isTip ? '#e74c3c' : '#f39c12';
+                    ctx.fill();
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>23 - HandPose バーチャルキーボード</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: white; text-align: center; }
+        #container { position: relative; display: inline-block; }
+        canvas { border-radius: 15px; }
+        #textDisplay { background: #16213e; padding: 20px; border-radius: 10px; margin: 20px auto; max-width: 640px; min-height: 50px; font-size: 24px; text-align: left; word-wrap: break-word; }
+        .cursor { animation: blink 1s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+        #instructions { background: #0f3460; padding: 15px; border-radius: 10px; max-width: 640px; margin: 0 auto 20px; font-size: 14px; }
+        #status { color: #4ecca3; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>バーチャルキーボード</h1>
+
+    <div id="instructions">
+        <p>✋ 手をかざすとキーボードが表示されます</p>
+        <p>👆 人差し指でキーに触れると入力されます</p>
+    </div>
+
+    <div id="textDisplay"><span class="cursor">|</span></div>
+
+    <div id="container">
+        <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+
+    <div id="status">読み込み中...</div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const textDisplay = document.getElementById('textDisplay');
+        const status = document.getElementById('status');
+
+        let video;
+        let handPose;
+        let hands = [];
+        let typedText = '';
+        let lastKeyPressed = null;
+        let keyPressTime = 0;
+
+        // キーボードレイアウト
+        const keyboard = [
+            ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+            ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'],
+            ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', '⌫'],
+            ['Z', 'X', 'C', 'V', 'B', 'N', 'M', '␣', '⏎']
+        ];
+
+        const keyWidth = 55;
+        const keyHeight = 45;
+        const keyGap = 5;
+        const keyboardStartX = 35;
+        const keyboardStartY = 230;
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            handPose = await ml5.handPose();
+            status.textContent = '準備完了！手をかざしてください';
+
+            detectHands();
+        }
+
+        async function detectHands() {
+            hands = await handPose.detect(video);
+            draw();
+            requestAnimationFrame(detectHands);
+        }
+
+        function getKeyPosition(row, col) {
+            const rowOffset = (row === 2) ? 20 : (row === 3) ? 40 : 0;
+            return {
+                x: keyboardStartX + col * (keyWidth + keyGap) + rowOffset,
+                y: keyboardStartY + row * (keyHeight + keyGap),
+                width: keyboard[row][col] === '␣' ? keyWidth * 2 : keyWidth,
+                height: keyHeight
+            };
+        }
+
+        function checkKeyPress(fingerX, fingerY) {
+            for (let row = 0; row < keyboard.length; row++) {
+                for (let col = 0; col < keyboard[row].length; col++) {
+                    const key = getKeyPosition(row, col);
+                    if (fingerX >= key.x && fingerX <= key.x + key.width &&
+                        fingerY >= key.y && fingerY <= key.y + key.height) {
+                        return keyboard[row][col];
+                    }
+                }
+            }
+            return null;
+        }
+
+        function handleKeyPress(key) {
+            const now = Date.now();
+
+            // デバウンス：同じキーは500ms間隔で
+            if (key === lastKeyPressed && now - keyPressTime < 500) {
+                return;
+            }
+
+            lastKeyPressed = key;
+            keyPressTime = now;
+
+            if (key === '⌫') {
+                typedText = typedText.slice(0, -1);
+            } else if (key === '␣') {
+                typedText += ' ';
+            } else if (key === '⏎') {
+                typedText += '\n';
+            } else {
+                typedText += key;
+            }
+
+            textDisplay.innerHTML = typedText.replace(/\n/g, '<br>') + '<span class="cursor">|</span>';
+        }
+
+        function draw() {
+            // ビデオを描画
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // キーボードの背景
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(keyboardStartX - 10, keyboardStartY - 10,
+                        10 * (keyWidth + keyGap) + 20, 4 * (keyHeight + keyGap) + 20);
+
+            let fingerTip = null;
+            let hoveredKey = null;
+
+            // 手の検出
+            if (hands.length > 0) {
+                const hand = hands[0];
+                const indexTip = hand.keypoints[8];
+                fingerTip = {
+                    x: canvas.width - indexTip.x,
+                    y: indexTip.y
+                };
+
+                hoveredKey = checkKeyPress(fingerTip.x, fingerTip.y);
+
+                // 人差し指が曲がっているかチェック（タップ検出）
+                const indexPIP = hand.keypoints[6];
+                const isTapping = indexTip.y > indexPIP.y + 10;
+
+                if (hoveredKey && isTapping) {
+                    handleKeyPress(hoveredKey);
+                }
+            }
+
+            // キーボードを描画
+            for (let row = 0; row < keyboard.length; row++) {
+                for (let col = 0; col < keyboard[row].length; col++) {
+                    const key = getKeyPosition(row, col);
+                    const keyChar = keyboard[row][col];
+                    const isHovered = hoveredKey === keyChar;
+                    const isLastPressed = keyChar === lastKeyPressed && Date.now() - keyPressTime < 200;
+
+                    // キーの背景
+                    ctx.fillStyle = isLastPressed ? '#4ecca3' : isHovered ? '#667eea' : '#2a2a4e';
+                    ctx.fillRect(key.x, key.y, key.width, key.height);
+
+                    // キーの枠線
+                    ctx.strokeStyle = isHovered ? '#fff' : '#444';
+                    ctx.lineWidth = isHovered ? 2 : 1;
+                    ctx.strokeRect(key.x, key.y, key.width, key.height);
+
+                    // キーの文字
+                    ctx.fillStyle = isLastPressed ? '#000' : '#fff';
+                    ctx.font = 'bold 18px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(keyChar, key.x + key.width / 2, key.y + key.height / 2);
+                }
+            }
+
+            // 指の位置を表示
+            if (fingerTip) {
+                ctx.beginPath();
+                ctx.arc(fingerTip.x, fingerTip.y, 15, 0, 2 * Math.PI);
+                ctx.fillStyle = hoveredKey ? 'rgba(102, 126, 234, 0.7)' : 'rgba(255, 255, 255, 0.5)';
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(fingerTip.x, fingerTip.y, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = '#fff';
+                ctx.fill();
+            }
+
+            // 手のスケルトンを描画
+            if (hands.length > 0) {
+                const hand = hands[0];
+                ctx.strokeStyle = 'rgba(78, 204, 163, 0.5)';
+                ctx.lineWidth = 2;
+
+                const fingerConnections = [
+                    [0, 5, 6, 7, 8],
+                    [0, 9, 10, 11, 12],
+                    [0, 13, 14, 15, 16],
+                    [0, 17, 18, 19, 20]
+                ];
+
+                for (let finger of fingerConnections) {
+                    ctx.beginPath();
+                    for (let i = 0; i < finger.length; i++) {
+                        const kp = hand.keypoints[finger[i]];
+                        const x = canvas.width - kp.x;
+                        if (i === 0) ctx.moveTo(x, kp.y);
+                        else ctx.lineTo(x, kp.y);
+                    }
+                    ctx.stroke();
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

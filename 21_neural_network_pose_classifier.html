@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>21 - Neural Network ポーズ分類器</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #0d1117; color: white; }
+        .container { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+        canvas { border-radius: 15px; }
+        .panel { background: #161b22; padding: 20px; border-radius: 15px; min-width: 300px; }
+        .panel h3 { margin-top: 0; color: #58a6ff; }
+        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0; }
+        button { padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; transition: all 0.3s; }
+        .pose-btn { background: #21262d; color: white; }
+        .pose-btn:hover { background: #30363d; }
+        .pose-btn.recording { background: #f85149; animation: pulse 1s infinite; }
+        .action-btn { background: #238636; color: white; }
+        .action-btn:disabled { background: #333; cursor: not-allowed; }
+        .predict-btn { background: #1f6feb; color: white; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        .result { font-size: 48px; margin: 20px 0; padding: 20px; background: #21262d; border-radius: 15px; }
+        .data-count { display: flex; justify-content: space-around; margin: 15px 0; }
+        .count-item { text-align: center; }
+        .count-num { font-size: 24px; font-weight: bold; color: #58a6ff; }
+        .count-label { font-size: 12px; color: #8b949e; }
+        #status { color: #4ecca3; margin: 10px 0; min-height: 20px; }
+        input { padding: 10px; border-radius: 8px; border: none; background: #21262d; color: white; width: 150px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>カスタムポーズ分類器</h1>
+    <p>独自のポーズを訓練して認識させよう</p>
+
+    <div class="container">
+        <canvas id="canvas" width="640" height="480"></canvas>
+
+        <div class="panel">
+            <h3>1. ポーズを登録</h3>
+            <div>
+                <input type="text" id="poseNameInput" placeholder="ポーズ名を入力">
+                <button class="action-btn" onclick="addPoseClass()">追加</button>
+            </div>
+
+            <div class="btn-group" id="poseButtons"></div>
+
+            <div class="data-count" id="dataCount"></div>
+
+            <div id="status">BodyPoseを読み込み中...</div>
+
+            <h3>2. 訓練</h3>
+            <button class="action-btn" id="trainBtn" onclick="trainModel()" disabled>訓練開始</button>
+
+            <h3>3. 予測</h3>
+            <button class="predict-btn" id="predictBtn" onclick="togglePredict()" disabled>予測開始</button>
+
+            <div class="result" id="result">-</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const poseButtons = document.getElementById('poseButtons');
+        const dataCount = document.getElementById('dataCount');
+        const status = document.getElementById('status');
+        const result = document.getElementById('result');
+        const trainBtn = document.getElementById('trainBtn');
+        const predictBtn = document.getElementById('predictBtn');
+
+        let video;
+        let bodyPose;
+        let poses = [];
+        let nn;
+        let poseClasses = [];
+        let poseData = {};
+        let currentRecording = null;
+        let isPredicting = false;
+        let isTrained = false;
+
+        // ニューラルネットワークを初期化
+        function initNN() {
+            const options = {
+                inputs: 34, // 17キーポイント × 2 (x, y)
+                outputs: ['label'],
+                task: 'classification'
+            };
+            nn = ml5.neuralNetwork(options);
+        }
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet');
+            status.textContent = '準備完了！ポーズ名を追加してください';
+
+            initNN();
+            detectPose();
+        }
+
+        async function detectPose() {
+            poses = await bodyPose.detect(video);
+            draw();
+
+            if (currentRecording && poses.length > 0) {
+                collectData(currentRecording);
+            }
+
+            if (isPredicting && poses.length > 0 && isTrained) {
+                predictPose();
+            }
+
+            requestAnimationFrame(detectPose);
+        }
+
+        function addPoseClass() {
+            const name = document.getElementById('poseNameInput').value.trim();
+            if (!name || poseClasses.includes(name)) {
+                status.textContent = '有効なポーズ名を入力してください';
+                return;
+            }
+
+            poseClasses.push(name);
+            poseData[name] = 0;
+
+            const btn = document.createElement('button');
+            btn.className = 'pose-btn';
+            btn.textContent = name;
+            btn.id = `btn-${name}`;
+            btn.onmousedown = () => startRecording(name);
+            btn.onmouseup = () => stopRecording();
+            btn.onmouseleave = () => stopRecording();
+            poseButtons.appendChild(btn);
+
+            document.getElementById('poseNameInput').value = '';
+            updateDataCount();
+            status.textContent = `「${name}」を追加しました。ボタンを押しながらポーズをとってください`;
+        }
+
+        function startRecording(name) {
+            currentRecording = name;
+            document.getElementById(`btn-${name}`).classList.add('recording');
+            status.textContent = `「${name}」を記録中...`;
+        }
+
+        function stopRecording() {
+            if (currentRecording) {
+                const btn = document.getElementById(`btn-${currentRecording}`);
+                if (btn) btn.classList.remove('recording');
+                status.textContent = `記録停止。${poseData[currentRecording]}件のデータ`;
+            }
+            currentRecording = null;
+            updateTrainButton();
+        }
+
+        function collectData(label) {
+            if (poses.length === 0) return;
+
+            const pose = poses[0];
+            const inputs = [];
+
+            for (let kp of pose.keypoints) {
+                inputs.push(kp.x / canvas.width);
+                inputs.push(kp.y / canvas.height);
+            }
+
+            nn.addData(inputs, { label });
+            poseData[label]++;
+            updateDataCount();
+        }
+
+        function updateDataCount() {
+            dataCount.innerHTML = poseClasses.map(name => `
+                <div class="count-item">
+                    <div class="count-num">${poseData[name]}</div>
+                    <div class="count-label">${name}</div>
+                </div>
+            `).join('');
+        }
+
+        function updateTrainButton() {
+            const totalData = Object.values(poseData).reduce((a, b) => a + b, 0);
+            const hasEnoughData = poseClasses.length >= 2 && totalData >= 20;
+            trainBtn.disabled = !hasEnoughData;
+        }
+
+        async function trainModel() {
+            status.textContent = '訓練中...';
+            trainBtn.disabled = true;
+
+            nn.normalizeData();
+
+            await nn.train({ epochs: 50 }, (epoch, loss) => {
+                if (epoch % 10 === 0) {
+                    status.textContent = `訓練中... エポック: ${epoch}`;
+                }
+            });
+
+            status.textContent = '訓練完了！予測を開始できます';
+            isTrained = true;
+            predictBtn.disabled = false;
+        }
+
+        function togglePredict() {
+            isPredicting = !isPredicting;
+            predictBtn.textContent = isPredicting ? '予測停止' : '予測開始';
+            predictBtn.style.background = isPredicting ? '#f85149' : '#1f6feb';
+
+            if (!isPredicting) {
+                result.textContent = '-';
+            }
+        }
+
+        async function predictPose() {
+            if (poses.length === 0) return;
+
+            const pose = poses[0];
+            const inputs = [];
+
+            for (let kp of pose.keypoints) {
+                inputs.push(kp.x / canvas.width);
+                inputs.push(kp.y / canvas.height);
+            }
+
+            try {
+                const results = await nn.classify(inputs);
+                result.innerHTML = `${results[0].label}<br><span style="font-size:18px;color:#8b949e">${(results[0].confidence * 100).toFixed(1)}%</span>`;
+            } catch (e) {
+                // 続行
+            }
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (poses.length > 0) {
+                const pose = poses[0];
+
+                // スケルトンを描画
+                const connections = [
+                    ['left_shoulder', 'right_shoulder'],
+                    ['left_shoulder', 'left_elbow'],
+                    ['left_elbow', 'left_wrist'],
+                    ['right_shoulder', 'right_elbow'],
+                    ['right_elbow', 'right_wrist'],
+                    ['left_shoulder', 'left_hip'],
+                    ['right_shoulder', 'right_hip'],
+                    ['left_hip', 'right_hip'],
+                    ['left_hip', 'left_knee'],
+                    ['left_knee', 'left_ankle'],
+                    ['right_hip', 'right_knee'],
+                    ['right_knee', 'right_ankle']
+                ];
+
+                ctx.strokeStyle = currentRecording ? '#f85149' : '#58a6ff';
+                ctx.lineWidth = 3;
+
+                for (let [start, end] of connections) {
+                    const s = pose.keypoints.find(k => k.name === start);
+                    const e = pose.keypoints.find(k => k.name === end);
+                    if (s && e && s.confidence > 0.3 && e.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.moveTo(canvas.width - s.x, s.y);
+                        ctx.lineTo(canvas.width - e.x, e.y);
+                        ctx.stroke();
+                    }
+                }
+
+                for (let kp of pose.keypoints) {
+                    if (kp.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width - kp.x, kp.y, 6, 0, 2 * Math.PI);
+                        ctx.fillStyle = currentRecording ? '#f85149' : '#4ecca3';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

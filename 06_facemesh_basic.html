@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - FaceMesh 基本</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; margin: 0; }
+        canvas { border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        #status { margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.2); border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <h1>FaceMesh - 顔のランドマーク</h1>
+    <p>顔の478個のポイントを検出します</p>
+
+    <canvas id="canvas"></canvas>
+    <div id="status">読み込み中...</div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+
+        let video;
+        let faceMesh;
+        let faces = [];
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+            canvas.width = 640;
+            canvas.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            // FaceMeshを初期化
+            faceMesh = await ml5.faceMesh();
+            status.textContent = '準備完了！顔をカメラに向けてください';
+
+            detectFaces();
+        }
+
+        async function detectFaces() {
+            faces = await faceMesh.detect(video);
+            draw();
+            requestAnimationFrame(detectFaces);
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (faces.length > 0) {
+                const face = faces[0];
+                status.textContent = `検出ポイント: ${face.keypoints.length}個`;
+
+                // すべてのキーポイントを小さな点で描画
+                ctx.fillStyle = 'rgba(0, 255, 200, 0.6)';
+                for (let keypoint of face.keypoints) {
+                    const x = canvas.width - keypoint.x;
+                    ctx.beginPath();
+                    ctx.arc(x, keypoint.y, 1.5, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+
+                // 特徴的なポイントを強調（目、鼻、口）
+                const importantPoints = [
+                    { index: 1, color: '#ff6b6b', label: '鼻先' },
+                    { index: 33, color: '#4ecdc4', label: '右目' },
+                    { index: 263, color: '#4ecdc4', label: '左目' },
+                    { index: 61, color: '#ffe66d', label: '口右' },
+                    { index: 291, color: '#ffe66d', label: '口左' }
+                ];
+
+                for (let point of importantPoints) {
+                    if (face.keypoints[point.index]) {
+                        const kp = face.keypoints[point.index];
+                        const x = canvas.width - kp.x;
+                        ctx.beginPath();
+                        ctx.arc(x, kp.y, 6, 0, 2 * Math.PI);
+                        ctx.fillStyle = point.color;
+                        ctx.fill();
+                    }
+                }
+            } else {
+                status.textContent = '顔を検出していません...';
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

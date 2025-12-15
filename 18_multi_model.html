@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>18 - マルチモデル同時使用</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #0a0a0a; color: white; }
+        .container { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+        canvas { border-radius: 10px; }
+        .panel { background: #1a1a1a; padding: 15px; border-radius: 10px; min-width: 200px; }
+        .panel h3 { margin: 0 0 10px 0; color: #888; font-size: 14px; }
+        .status { font-size: 14px; padding: 8px; border-radius: 5px; margin: 5px 0; }
+        .status.loading { background: #333; color: #888; }
+        .status.ready { background: #1a472a; color: #4ecca3; }
+        .detection { font-size: 18px; font-weight: bold; margin: 10px 0; }
+        .details { font-size: 12px; color: #666; }
+        .toggle { padding: 8px 15px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; font-size: 12px; }
+        .toggle.on { background: #4ecca3; color: black; }
+        .toggle.off { background: #333; color: #888; }
+    </style>
+</head>
+<body>
+    <h1>マルチモデル検出</h1>
+    <p>複数のMLモデルを同時に動かす</p>
+
+    <div class="container">
+        <canvas id="canvas"></canvas>
+
+        <div style="display: flex; flex-direction: column; gap: 15px;">
+            <div class="panel">
+                <h3>🧍 BodyPose</h3>
+                <div class="status loading" id="bodyStatus">読み込み中...</div>
+                <button class="toggle on" id="bodyToggle" onclick="toggleModel('body')">ON</button>
+                <div class="detection" id="bodyDetection">-</div>
+            </div>
+
+            <div class="panel">
+                <h3>✋ HandPose</h3>
+                <div class="status loading" id="handStatus">読み込み中...</div>
+                <button class="toggle on" id="handToggle" onclick="toggleModel('hand')">ON</button>
+                <div class="detection" id="handDetection">-</div>
+            </div>
+
+            <div class="panel">
+                <h3>😊 FaceMesh</h3>
+                <div class="status loading" id="faceStatus">読み込み中...</div>
+                <button class="toggle on" id="faceToggle" onclick="toggleModel('face')">ON</button>
+                <div class="detection" id="faceDetection">-</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = 640;
+        canvas.height = 480;
+
+        let video;
+        let bodyPose, handPose, faceMesh;
+        let poses = [], hands = [], faces = [];
+
+        const models = {
+            body: { enabled: true, loaded: false },
+            hand: { enabled: true, loaded: false },
+            face: { enabled: true, loaded: false }
+        };
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            // 並列でモデルを読み込む
+            loadModels();
+            animate();
+        }
+
+        async function loadModels() {
+            // BodyPose
+            try {
+                bodyPose = await ml5.bodyPose('MoveNet');
+                models.body.loaded = true;
+                document.getElementById('bodyStatus').className = 'status ready';
+                document.getElementById('bodyStatus').textContent = '準備完了';
+            } catch (e) {
+                document.getElementById('bodyStatus').textContent = 'エラー';
+            }
+
+            // HandPose
+            try {
+                handPose = await ml5.handPose();
+                models.hand.loaded = true;
+                document.getElementById('handStatus').className = 'status ready';
+                document.getElementById('handStatus').textContent = '準備完了';
+            } catch (e) {
+                document.getElementById('handStatus').textContent = 'エラー';
+            }
+
+            // FaceMesh
+            try {
+                faceMesh = await ml5.faceMesh();
+                models.face.loaded = true;
+                document.getElementById('faceStatus').className = 'status ready';
+                document.getElementById('faceStatus').textContent = '準備完了';
+            } catch (e) {
+                document.getElementById('faceStatus').textContent = 'エラー';
+            }
+        }
+
+        function toggleModel(model) {
+            models[model].enabled = !models[model].enabled;
+            const btn = document.getElementById(model + 'Toggle');
+            btn.className = models[model].enabled ? 'toggle on' : 'toggle off';
+            btn.textContent = models[model].enabled ? 'ON' : 'OFF';
+        }
+
+        async function detect() {
+            // 各モデルで検出
+            if (models.body.enabled && models.body.loaded) {
+                poses = await bodyPose.detect(video);
+                document.getElementById('bodyDetection').textContent =
+                    poses.length > 0 ? `${poses.length}人検出` : '-';
+            } else {
+                poses = [];
+                document.getElementById('bodyDetection').textContent = '-';
+            }
+
+            if (models.hand.enabled && models.hand.loaded) {
+                hands = await handPose.detect(video);
+                document.getElementById('handDetection').textContent =
+                    hands.length > 0 ? `${hands.length}つの手` : '-';
+            } else {
+                hands = [];
+                document.getElementById('handDetection').textContent = '-';
+            }
+
+            if (models.face.enabled && models.face.loaded) {
+                faces = await faceMesh.detect(video);
+                document.getElementById('faceDetection').textContent =
+                    faces.length > 0 ? `${faces.length}つの顔` : '-';
+            } else {
+                faces = [];
+                document.getElementById('faceDetection').textContent = '-';
+            }
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // BodyPoseを描画（緑）
+            if (poses.length > 0) {
+                for (let pose of poses) {
+                    for (let kp of pose.keypoints) {
+                        if (kp.confidence > 0.3) {
+                            ctx.beginPath();
+                            ctx.arc(canvas.width - kp.x, kp.y, 5, 0, 2 * Math.PI);
+                            ctx.fillStyle = '#4ecca3';
+                            ctx.fill();
+                        }
+                    }
+                }
+            }
+
+            // HandPoseを描画（オレンジ）
+            if (hands.length > 0) {
+                for (let hand of hands) {
+                    for (let kp of hand.keypoints) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width - kp.x, kp.y, 4, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#f39c12';
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // FaceMeshを描画（ピンク）
+            if (faces.length > 0) {
+                for (let face of faces) {
+                    for (let kp of face.keypoints) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width - kp.x, kp.y, 1, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#e84393';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        async function animate() {
+            await detect();
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        setup();
+    </script>
+</body>
+</html>

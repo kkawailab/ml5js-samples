@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>12 - HandPose お絵かき</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: white; }
+        #container { position: relative; display: inline-block; }
+        canvas { border-radius: 10px; position: absolute; top: 0; left: 0; }
+        #videoCanvas { z-index: 1; }
+        #drawCanvas { z-index: 2; }
+        .controls { margin: 20px 0; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+        .color-btn { width: 40px; height: 40px; border: 3px solid transparent; border-radius: 50%; cursor: pointer; transition: all 0.3s; }
+        .color-btn.active { border-color: white; transform: scale(1.2); }
+        button { padding: 10px 20px; font-size: 14px; border: none; border-radius: 8px; cursor: pointer; background: #45475a; color: white; }
+        button:hover { background: #585b70; }
+        #instructions { background: #313244; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>手で描くお絵かき</h1>
+
+    <div id="instructions">
+        <p>✌️ 人差し指を立てると描画モード | ✊ グーにすると描画停止</p>
+    </div>
+
+    <div class="controls">
+        <button class="color-btn active" style="background: #f38ba8" data-color="#f38ba8"></button>
+        <button class="color-btn" style="background: #fab387" data-color="#fab387"></button>
+        <button class="color-btn" style="background: #f9e2af" data-color="#f9e2af"></button>
+        <button class="color-btn" style="background: #a6e3a1" data-color="#a6e3a1"></button>
+        <button class="color-btn" style="background: #89b4fa" data-color="#89b4fa"></button>
+        <button class="color-btn" style="background: #cba6f7" data-color="#cba6f7"></button>
+        <button class="color-btn" style="background: white" data-color="white"></button>
+        <button onclick="clearCanvas()">クリア</button>
+        <button onclick="saveCanvas()">保存</button>
+    </div>
+
+    <div id="container">
+        <canvas id="videoCanvas" width="640" height="480"></canvas>
+        <canvas id="drawCanvas" width="640" height="480"></canvas>
+    </div>
+
+    <script>
+        const videoCanvas = document.getElementById('videoCanvas');
+        const drawCanvas = document.getElementById('drawCanvas');
+        const videoCtx = videoCanvas.getContext('2d');
+        const drawCtx = drawCanvas.getContext('2d');
+        const colorBtns = document.querySelectorAll('.color-btn');
+
+        let video;
+        let handPose;
+        let hands = [];
+        let currentColor = '#f38ba8';
+        let lastPoint = null;
+        let isDrawing = false;
+
+        // 色選択
+        colorBtns.forEach(btn => {
+            if (btn.dataset.color) {
+                btn.onclick = () => {
+                    colorBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentColor = btn.dataset.color;
+                };
+            }
+        });
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            handPose = await ml5.handPose();
+            detectHands();
+        }
+
+        async function detectHands() {
+            hands = await handPose.detect(video);
+            draw();
+            requestAnimationFrame(detectHands);
+        }
+
+        function isFingerExtended(hand, fingerTip, fingerPIP) {
+            const tip = hand.keypoints[fingerTip];
+            const pip = hand.keypoints[fingerPIP];
+            return tip.y < pip.y; // 指先がPIPより上にある = 伸びている
+        }
+
+        function checkDrawingMode(hand) {
+            // 人差し指だけが立っているかチェック
+            const indexExtended = isFingerExtended(hand, 8, 6);
+            const middleExtended = isFingerExtended(hand, 12, 10);
+            const ringExtended = isFingerExtended(hand, 16, 14);
+            const pinkyExtended = isFingerExtended(hand, 20, 18);
+
+            // 人差し指だけが立っている = 描画モード
+            return indexExtended && !middleExtended && !ringExtended && !pinkyExtended;
+        }
+
+        function draw() {
+            // ビデオを半透明で描画
+            videoCtx.save();
+            videoCtx.scale(-1, 1);
+            videoCtx.globalAlpha = 0.5;
+            videoCtx.drawImage(video, -videoCanvas.width, 0, videoCanvas.width, videoCanvas.height);
+            videoCtx.restore();
+
+            if (hands.length > 0) {
+                const hand = hands[0];
+                const indexTip = hand.keypoints[8];
+                const x = videoCanvas.width - indexTip.x;
+                const y = indexTip.y;
+
+                const shouldDraw = checkDrawingMode(hand);
+
+                // 描画モードインジケーター
+                videoCtx.beginPath();
+                videoCtx.arc(x, y, shouldDraw ? 15 : 8, 0, 2 * Math.PI);
+                videoCtx.fillStyle = shouldDraw ? currentColor : 'rgba(255,255,255,0.5)';
+                videoCtx.fill();
+
+                if (shouldDraw) {
+                    if (lastPoint) {
+                        drawCtx.beginPath();
+                        drawCtx.moveTo(lastPoint.x, lastPoint.y);
+                        drawCtx.lineTo(x, y);
+                        drawCtx.strokeStyle = currentColor;
+                        drawCtx.lineWidth = 5;
+                        drawCtx.lineCap = 'round';
+                        drawCtx.stroke();
+                    }
+                    lastPoint = { x, y };
+                } else {
+                    lastPoint = null;
+                }
+            } else {
+                lastPoint = null;
+            }
+        }
+
+        function clearCanvas() {
+            drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+        }
+
+        function saveCanvas() {
+            const link = document.createElement('a');
+            link.download = 'my-drawing.png';
+            link.href = drawCanvas.toDataURL();
+            link.click();
+        }
+
+        setup();
+    </script>
+</body>
+</html>

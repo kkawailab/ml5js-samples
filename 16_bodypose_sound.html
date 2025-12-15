@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>16 - BodyPose 体で音楽</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #0d1b2a; color: white; margin: 0; }
+        canvas { border-radius: 15px; }
+        .info { margin: 20px; padding: 20px; background: #1b263b; border-radius: 15px; }
+        .zone { display: inline-block; padding: 15px 25px; margin: 5px; border-radius: 10px; font-size: 18px; }
+        #currentNote { font-size: 48px; margin: 20px 0; }
+        button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 10px; cursor: pointer; background: #e0e1dd; color: #0d1b2a; margin: 10px; }
+    </style>
+</head>
+<body>
+    <h1>🎵 体で音楽を奏でよう</h1>
+    <p>右手を動かして音を鳴らそう！高さで音程が、左右で音量が変わるよ</p>
+
+    <button onclick="startAudio()">🔊 音声を有効にする</button>
+
+    <canvas id="canvas"></canvas>
+
+    <div class="info">
+        <div class="zone" style="background: #ff6b6b">高い音 ↑</div>
+        <div class="zone" style="background: #4ecdc4">中間 ↔</div>
+        <div class="zone" style="background: #45b7d1">低い音 ↓</div>
+    </div>
+
+    <div id="currentNote">-</div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const currentNote = document.getElementById('currentNote');
+
+        canvas.width = 640;
+        canvas.height = 480;
+
+        let video;
+        let bodyPose;
+        let poses = [];
+        let audioCtx;
+        let oscillator;
+        let gainNode;
+        let isPlaying = false;
+
+        const notes = ['ド', 'レ', 'ミ', 'ファ', 'ソ', 'ラ', 'シ', 'ド↑'];
+        const frequencies = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25];
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet');
+            detectPose();
+        }
+
+        function startAudio() {
+            if (audioCtx) return;
+
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            gainNode = audioCtx.createGain();
+            gainNode.connect(audioCtx.destination);
+            gainNode.gain.value = 0;
+
+            oscillator = audioCtx.createOscillator();
+            oscillator.type = 'sine';
+            oscillator.connect(gainNode);
+            oscillator.start();
+        }
+
+        async function detectPose() {
+            poses = await bodyPose.detect(video);
+            updateSound();
+            draw();
+            requestAnimationFrame(detectPose);
+        }
+
+        function updateSound() {
+            if (!audioCtx || poses.length === 0) {
+                if (gainNode) gainNode.gain.value = 0;
+                currentNote.textContent = '-';
+                return;
+            }
+
+            const pose = poses[0];
+            const rightWrist = pose.keypoints.find(k => k.name === 'right_wrist');
+
+            if (!rightWrist || rightWrist.confidence < 0.3) {
+                gainNode.gain.value = 0;
+                currentNote.textContent = '-';
+                return;
+            }
+
+            // Y座標から音程を決定（上が高い音）
+            const normalizedY = rightWrist.y / canvas.height;
+            const noteIndex = Math.floor((1 - normalizedY) * frequencies.length);
+            const clampedIndex = Math.max(0, Math.min(frequencies.length - 1, noteIndex));
+
+            // X座標から音量を決定
+            const normalizedX = rightWrist.x / canvas.width;
+            const volume = Math.max(0, Math.min(1, normalizedX));
+
+            oscillator.frequency.setTargetAtTime(frequencies[clampedIndex], audioCtx.currentTime, 0.1);
+            gainNode.gain.setTargetAtTime(volume * 0.3, audioCtx.currentTime, 0.1);
+
+            currentNote.textContent = `${notes[clampedIndex]} 🎵`;
+            currentNote.style.color = `hsl(${clampedIndex * 45}, 70%, 60%)`;
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // 音程ゾーンを描画
+            const zoneHeight = canvas.height / frequencies.length;
+            for (let i = 0; i < frequencies.length; i++) {
+                ctx.fillStyle = `hsla(${i * 45}, 70%, 50%, 0.2)`;
+                ctx.fillRect(0, i * zoneHeight, canvas.width, zoneHeight);
+
+                ctx.fillStyle = 'white';
+                ctx.font = '16px Arial';
+                ctx.fillText(notes[frequencies.length - 1 - i], 10, i * zoneHeight + 25);
+            }
+
+            // ポーズを描画
+            if (poses.length > 0) {
+                const pose = poses[0];
+                const rightWrist = pose.keypoints.find(k => k.name === 'right_wrist');
+
+                if (rightWrist && rightWrist.confidence > 0.3) {
+                    const x = canvas.width - rightWrist.x;
+
+                    // 手の位置を強調
+                    ctx.beginPath();
+                    ctx.arc(x, rightWrist.y, 30, 0, 2 * Math.PI);
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+
+                    // 音符エフェクト
+                    ctx.font = '40px Arial';
+                    ctx.fillText('🎵', x - 20, rightWrist.y - 40);
+                }
+
+                // スケルトンを描画
+                for (let keypoint of pose.keypoints) {
+                    if (keypoint.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width - keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#4ecdc4';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>
