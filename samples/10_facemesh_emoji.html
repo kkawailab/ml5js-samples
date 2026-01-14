@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10 - FaceMesh 絵文字オーバーレイ</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #1a1a2e; color: white; }
+        canvas { border-radius: 15px; }
+        .controls { margin: 20px 0; }
+        .emoji-btn { font-size: 30px; padding: 10px 20px; margin: 5px; border: none; border-radius: 10px; cursor: pointer; background: #16213e; transition: all 0.3s; }
+        .emoji-btn:hover { transform: scale(1.1); }
+        .emoji-btn.active { background: #e94560; }
+        #status { margin-top: 10px; color: #4ecca3; }
+    </style>
+</head>
+<body>
+    <h1>顔に絵文字オーバーレイ</h1>
+    <p>絵文字を選んで顔に表示しよう</p>
+
+    <div class="controls">
+        <button class="emoji-btn active" data-emoji="😎">😎</button>
+        <button class="emoji-btn" data-emoji="🥳">🥳</button>
+        <button class="emoji-btn" data-emoji="😷">😷</button>
+        <button class="emoji-btn" data-emoji="🤖">🤖</button>
+        <button class="emoji-btn" data-emoji="👽">👽</button>
+        <button class="emoji-btn" data-emoji="🦊">🦊</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+    <div id="status">読み込み中...</div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
+        const emojiButtons = document.querySelectorAll('.emoji-btn');
+
+        let video;
+        let faceMesh;
+        let faces = [];
+        let currentEmoji = '😎';
+
+        // 絵文字ボタンのクリック処理
+        emojiButtons.forEach(btn => {
+            btn.onclick = () => {
+                emojiButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentEmoji = btn.dataset.emoji;
+            };
+        });
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+            canvas.width = 640;
+            canvas.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            faceMesh = await ml5.faceMesh();
+            status.textContent = '準備完了！';
+
+            detectFaces();
+        }
+
+        async function detectFaces() {
+            faces = await faceMesh.detect(video);
+            draw();
+            requestAnimationFrame(detectFaces);
+        }
+
+        function draw() {
+            // ビデオを左右反転して描画
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (faces.length > 0) {
+                for (let face of faces) {
+                    // 顔の位置とサイズを計算
+                    const nose = face.keypoints[1]; // 鼻先
+                    const leftEye = face.keypoints[33];
+                    const rightEye = face.keypoints[263];
+
+                    if (nose && leftEye && rightEye) {
+                        // 顔の幅を計算（目の間の距離から推定）
+                        const eyeDistance = Math.abs(rightEye.x - leftEye.x);
+                        const faceSize = eyeDistance * 3;
+
+                        // 左右反転した座標
+                        const x = canvas.width - nose.x;
+                        const y = nose.y - faceSize * 0.3;
+
+                        // 絵文字を描画
+                        ctx.font = `${faceSize}px Arial`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(currentEmoji, x, y);
+                    }
+                }
+                status.textContent = `${faces.length}人の顔を検出`;
+            } else {
+                status.textContent = '顔を検出していません...';
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

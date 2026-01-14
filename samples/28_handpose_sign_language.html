@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>28 - HandPose 指文字認識</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #0d1117; color: white; text-align: center; }
+        .container { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 350px; gap: 20px; }
+        @media (max-width: 900px) { .container { grid-template-columns: 1fr; } }
+        canvas { border-radius: 15px; width: 100%; }
+        .panel { background: #161b22; padding: 20px; border-radius: 15px; text-align: left; }
+        .panel h3 { margin-top: 0; color: #58a6ff; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
+        .detected-letter { font-size: 120px; text-align: center; padding: 30px; background: #21262d; border-radius: 15px; margin-bottom: 20px; }
+        .sentence { background: #21262d; padding: 20px; border-radius: 10px; min-height: 60px; font-size: 24px; margin-bottom: 20px; word-wrap: break-word; }
+        .letter-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 20px; }
+        .letter-btn { padding: 15px; border: 2px solid #30363d; border-radius: 8px; background: transparent; color: white; cursor: pointer; font-size: 18px; transition: all 0.3s; }
+        .letter-btn:hover { border-color: #58a6ff; }
+        .letter-btn.detected { background: #238636; border-color: #238636; }
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; }
+        button { padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .clear-btn { background: #f85149; color: white; flex: 1; }
+        .space-btn { background: #21262d; color: white; flex: 1; }
+        #status { color: #4ecca3; margin: 10px 0; }
+        .instructions { background: #21262d; padding: 15px; border-radius: 10px; margin-bottom: 20px; font-size: 14px; }
+        .confidence { text-align: center; color: #8b949e; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>指文字認識システム</h1>
+    <p>手の形から指文字（アルファベット）を認識します</p>
+
+    <div class="container">
+        <div>
+            <canvas id="canvas" width="640" height="480"></canvas>
+            <div id="status">読み込み中...</div>
+        </div>
+
+        <div>
+            <div class="detected-letter" id="detectedLetter">?</div>
+            <div class="confidence" id="confidence">確信度: -</div>
+
+            <div class="panel">
+                <h3>認識した文</h3>
+                <div class="sentence" id="sentence"></div>
+                <div class="controls">
+                    <button class="space-btn" onclick="addSpace()">スペース</button>
+                    <button class="clear-btn" onclick="clearSentence()">クリア</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>指文字ガイド</h3>
+                <div class="instructions">
+                    ✊ グー = A<br>
+                    ✌️ チョキ = V<br>
+                    ✋ パー = B<br>
+                    👆 1本指 = D<br>
+                    🤟 ILY = I Love You
+                </div>
+                <div class="letter-grid" id="letterGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const detectedLetter = document.getElementById('detectedLetter');
+        const confidenceDiv = document.getElementById('confidence');
+        const sentenceDiv = document.getElementById('sentence');
+        const letterGrid = document.getElementById('letterGrid');
+        const status = document.getElementById('status');
+
+        let video;
+        let handPose;
+        let hands = [];
+        let sentence = '';
+        let lastLetter = null;
+        let letterHoldTime = 0;
+        let detectionHistory = [];
+
+        // 認識する文字
+        const letters = ['A', 'B', 'C', 'D', 'E', 'F', 'I', 'L', 'O', 'V', 'W', 'Y'];
+
+        // レターグリッドを生成
+        letters.forEach(letter => {
+            const btn = document.createElement('button');
+            btn.className = 'letter-btn';
+            btn.id = `letter-${letter}`;
+            btn.textContent = letter;
+            letterGrid.appendChild(btn);
+        });
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            handPose = await ml5.handPose();
+            status.textContent = '準備完了！手をかざしてください';
+
+            detectHands();
+        }
+
+        async function detectHands() {
+            hands = await handPose.detect(video);
+            const result = recognizeLetter();
+            updateDisplay(result);
+            draw();
+            requestAnimationFrame(detectHands);
+        }
+
+        function isFingerExtended(hand, tipIdx, pipIdx) {
+            const tip = hand.keypoints[tipIdx];
+            const pip = hand.keypoints[pipIdx];
+            return tip.y < pip.y - 15;
+        }
+
+        function isThumbExtended(hand) {
+            const tip = hand.keypoints[4];
+            const mcp = hand.keypoints[2];
+            return Math.abs(tip.x - mcp.x) > 50;
+        }
+
+        function getFingerStates(hand) {
+            return {
+                thumb: isThumbExtended(hand),
+                index: isFingerExtended(hand, 8, 6),
+                middle: isFingerExtended(hand, 12, 10),
+                ring: isFingerExtended(hand, 16, 14),
+                pinky: isFingerExtended(hand, 20, 18)
+            };
+        }
+
+        function recognizeLetter() {
+            if (hands.length === 0) {
+                return { letter: null, confidence: 0 };
+            }
+
+            const hand = hands[0];
+            const fingers = getFingerStates(hand);
+            const { thumb, index, middle, ring, pinky } = fingers;
+
+            let letter = null;
+            let confidence = 0.9;
+
+            // 指文字パターン認識
+            if (!thumb && !index && !middle && !ring && !pinky) {
+                letter = 'A'; // グー
+            } else if (!thumb && index && middle && ring && pinky) {
+                letter = 'B'; // 4本指
+            } else if (thumb && index && middle && ring && pinky) {
+                letter = 'C'; // 全部開く（カーブ）
+                confidence = 0.7;
+            } else if (!thumb && index && !middle && !ring && !pinky) {
+                letter = 'D'; // 人差し指のみ
+            } else if (!thumb && !index && !middle && !ring && !pinky) {
+                letter = 'E';
+                confidence = 0.6;
+            } else if (!thumb && index && middle && ring && !pinky) {
+                letter = 'F'; // 3本指
+                confidence = 0.7;
+            } else if (thumb && !index && !middle && !ring && pinky) {
+                letter = 'I'; // 小指と親指
+            } else if (thumb && index && !middle && !ring && !pinky) {
+                letter = 'L'; // L字
+            } else if (thumb && index && middle && !ring && !pinky) {
+                letter = 'O';
+                confidence = 0.6;
+            } else if (!thumb && index && middle && !ring && !pinky) {
+                letter = 'V'; // チョキ
+            } else if (!thumb && index && middle && ring && !pinky) {
+                letter = 'W'; // 3本
+            } else if (thumb && !index && !middle && !ring && pinky) {
+                letter = 'Y'; // Shaka
+            }
+
+            return { letter, confidence };
+        }
+
+        function updateDisplay(result) {
+            // 検出履歴を更新
+            detectionHistory.push(result.letter);
+            if (detectionHistory.length > 10) detectionHistory.shift();
+
+            // 最も多く検出された文字を確定
+            const counts = {};
+            detectionHistory.forEach(l => {
+                if (l) counts[l] = (counts[l] || 0) + 1;
+            });
+
+            let mostFrequent = null;
+            let maxCount = 0;
+            for (let l in counts) {
+                if (counts[l] > maxCount) {
+                    maxCount = counts[l];
+                    mostFrequent = l;
+                }
+            }
+
+            // 表示更新
+            if (mostFrequent && maxCount >= 5) {
+                detectedLetter.textContent = mostFrequent;
+                confidenceDiv.textContent = `確信度: ${(result.confidence * 100).toFixed(0)}%`;
+
+                // ハイライト
+                document.querySelectorAll('.letter-btn').forEach(btn => btn.classList.remove('detected'));
+                const btn = document.getElementById(`letter-${mostFrequent}`);
+                if (btn) btn.classList.add('detected');
+
+                // 文字を追加（同じ文字は連続で追加しない）
+                if (mostFrequent !== lastLetter) {
+                    letterHoldTime++;
+                    if (letterHoldTime > 15) {
+                        sentence += mostFrequent;
+                        sentenceDiv.textContent = sentence;
+                        lastLetter = mostFrequent;
+                        letterHoldTime = 0;
+                        detectionHistory = [];
+                    }
+                }
+            } else {
+                detectedLetter.textContent = '?';
+                confidenceDiv.textContent = '確信度: -';
+                document.querySelectorAll('.letter-btn').forEach(btn => btn.classList.remove('detected'));
+                letterHoldTime = 0;
+            }
+        }
+
+        function addSpace() {
+            sentence += ' ';
+            sentenceDiv.textContent = sentence;
+            lastLetter = null;
+        }
+
+        function clearSentence() {
+            sentence = '';
+            sentenceDiv.textContent = '';
+            lastLetter = null;
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (hands.length > 0) {
+                const hand = hands[0];
+
+                // 骨格を描画
+                const connections = [
+                    [0, 1, 2, 3, 4],
+                    [0, 5, 6, 7, 8],
+                    [0, 9, 10, 11, 12],
+                    [0, 13, 14, 15, 16],
+                    [0, 17, 18, 19, 20]
+                ];
+
+                ctx.strokeStyle = '#58a6ff';
+                ctx.lineWidth = 3;
+
+                for (let finger of connections) {
+                    ctx.beginPath();
+                    for (let i = 0; i < finger.length; i++) {
+                        const kp = hand.keypoints[finger[i]];
+                        const x = canvas.width - kp.x;
+                        if (i === 0) ctx.moveTo(x, kp.y);
+                        else ctx.lineTo(x, kp.y);
+                    }
+                    ctx.stroke();
+                }
+
+                // キーポイント
+                for (let i = 0; i < hand.keypoints.length; i++) {
+                    const kp = hand.keypoints[i];
+                    const isTip = [4, 8, 12, 16, 20].includes(i);
+
+                    ctx.beginPath();
+                    ctx.arc(canvas.width - kp.x, kp.y, isTip ? 10 : 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = isTip ? '#f85149' : '#4ecca3';
+                    ctx.fill();
+                }
+
+                // 指の状態を表示
+                const fingers = getFingerStates(hand);
+                ctx.fillStyle = 'white';
+                ctx.font = '14px Arial';
+                ctx.fillText(`親: ${fingers.thumb ? '開' : '閉'}`, 10, 30);
+                ctx.fillText(`人: ${fingers.index ? '開' : '閉'}`, 10, 50);
+                ctx.fillText(`中: ${fingers.middle ? '開' : '閉'}`, 10, 70);
+                ctx.fillText(`薬: ${fingers.ring ? '開' : '閉'}`, 10, 90);
+                ctx.fillText(`小: ${fingers.pinky ? '開' : '閉'}`, 10, 110);
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

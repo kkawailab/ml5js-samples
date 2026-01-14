@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>02 - Image Classifier + Webcam</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+        #result { margin-top: 20px; font-size: 24px; background: #f0f0f0; padding: 20px; border-radius: 10px; }
+        video { border-radius: 10px; transform: scaleX(-1); }
+    </style>
+</head>
+<body>
+    <h1>リアルタイム画像分類</h1>
+    <p>ウェブカメラの映像をリアルタイムで分類します</p>
+
+    <video id="video" width="640" height="480" autoplay></video>
+    <div id="result">カメラを起動中...</div>
+
+    <script>
+        const video = document.getElementById('video');
+        const resultDiv = document.getElementById('result');
+        let classifier;
+
+        // カメラを起動
+        async function setup() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+
+            // 分類器を初期化
+            classifier = await ml5.imageClassifier('MobileNet');
+            resultDiv.textContent = '準備完了！分類を開始します...';
+
+            // 分類を開始
+            classifyVideo();
+        }
+
+        // 連続して分類
+        async function classifyVideo() {
+            const results = await classifier.classify(video);
+
+            resultDiv.innerHTML = `
+                <p><strong>検出:</strong> ${results[0].label}</p>
+                <p><strong>確信度:</strong> ${(results[0].confidence * 100).toFixed(2)}%</p>
+            `;
+
+            // 次のフレームを分類
+            requestAnimationFrame(classifyVideo);
+        }
+
+        setup();
+    </script>
+</body>
+</html>

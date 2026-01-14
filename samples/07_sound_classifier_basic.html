@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - Sound Classifier 基本</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #1a1a2e; color: white; }
+        #result { font-size: 48px; margin: 40px 0; padding: 30px; background: #16213e; border-radius: 15px; }
+        #confidence { font-size: 24px; color: #4ecca3; }
+        .indicator { width: 100px; height: 100px; border-radius: 50%; margin: 20px auto; transition: all 0.3s; }
+        .listening { background: #4ecca3; box-shadow: 0 0 30px #4ecca3; }
+        .not-listening { background: #e94560; }
+        button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; background: #4ecca3; color: #1a1a2e; }
+        button:hover { background: #3dbb92; }
+    </style>
+</head>
+<body>
+    <h1>音声分類</h1>
+    <p>マイクの音声を分類します（話し声/背景音/特定の音）</p>
+
+    <div class="indicator not-listening" id="indicator"></div>
+
+    <button id="startBtn">音声認識を開始</button>
+
+    <div id="result">-</div>
+    <div id="confidence">確信度: -</div>
+
+    <script>
+        const resultDiv = document.getElementById('result');
+        const confidenceDiv = document.getElementById('confidence');
+        const indicator = document.getElementById('indicator');
+        const startBtn = document.getElementById('startBtn');
+
+        let soundClassifier;
+        let isListening = false;
+
+        startBtn.onclick = async function() {
+            if (isListening) {
+                isListening = false;
+                startBtn.textContent = '音声認識を開始';
+                indicator.className = 'indicator not-listening';
+                resultDiv.textContent = '-';
+                confidenceDiv.textContent = '確信度: -';
+                return;
+            }
+
+            startBtn.textContent = '読み込み中...';
+
+            try {
+                // SpeechCommands18wモデルで音声分類器を初期化
+                soundClassifier = await ml5.soundClassifier('SpeechCommands18w');
+
+                isListening = true;
+                startBtn.textContent = '停止';
+                indicator.className = 'indicator listening';
+
+                // 分類開始
+                classifySound();
+            } catch (error) {
+                resultDiv.textContent = 'エラー: マイクの許可が必要です';
+                startBtn.textContent = '音声認識を開始';
+            }
+        };
+
+        async function classifySound() {
+            if (!isListening) return;
+
+            const results = await soundClassifier.classify();
+
+            if (results && results.length > 0) {
+                resultDiv.textContent = results[0].label;
+                confidenceDiv.textContent = `確信度: ${(results[0].confidence * 100).toFixed(1)}%`;
+            }
+
+            // 次の分類
+            setTimeout(classifySound, 100);
+        }
+    </script>
+</body>
+</html>

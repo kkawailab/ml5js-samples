@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>25 - マルチパーソントラッキング</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #0d1117; color: white; text-align: center; }
+        .container { display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+        canvas { border-radius: 15px; }
+        .panel { background: #161b22; padding: 20px; border-radius: 15px; min-width: 300px; text-align: left; }
+        .panel h3 { margin-top: 0; color: #58a6ff; }
+        .person-card { background: #21262d; padding: 15px; border-radius: 10px; margin-bottom: 10px; border-left: 4px solid; }
+        .person-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .person-id { font-weight: bold; font-size: 18px; }
+        .person-status { padding: 4px 10px; border-radius: 15px; font-size: 12px; }
+        .person-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; }
+        .stat { background: #161b22; padding: 8px; border-radius: 5px; }
+        .stat-label { color: #8b949e; }
+        .stat-value { font-weight: bold; color: #4ecca3; }
+        #summary { background: #21262d; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
+        #status { color: #4ecca3; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>マルチパーソントラッキング</h1>
+    <p>複数人を同時に追跡し、個別に分析します</p>
+
+    <div class="container">
+        <canvas id="canvas" width="640" height="480"></canvas>
+
+        <div class="panel">
+            <div id="summary">
+                <h3 style="margin: 0 0 10px 0;">👥 検出状況</h3>
+                <div style="font-size: 36px; font-weight: bold; color: #58a6ff;" id="personCount">0</div>
+                <div style="font-size: 14px; color: #8b949e;">人検出中</div>
+            </div>
+
+            <h3>個人データ</h3>
+            <div id="personList">
+                <p style="color: #8b949e;">人物を検出中...</p>
+            </div>
+
+            <div id="status">読み込み中...</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const personCount = document.getElementById('personCount');
+        const personList = document.getElementById('personList');
+        const status = document.getElementById('status');
+
+        let video;
+        let bodyPose;
+        let poses = [];
+
+        // 各人物のトラッキングデータ
+        let trackedPersons = {};
+        let personIdCounter = 0;
+
+        // 各人物に割り当てる色
+        const personColors = [
+            '#ff6b6b', '#4ecdc4', '#f9ca24', '#6c5ce7',
+            '#fd79a8', '#00b894', '#e17055', '#0984e3'
+        ];
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet', { maxPoses: 6 });
+            status.textContent = '準備完了！';
+
+            detectPoses();
+        }
+
+        async function detectPoses() {
+            poses = await bodyPose.detect(video);
+            updateTracking();
+            draw();
+            requestAnimationFrame(detectPoses);
+        }
+
+        function getNosePosition(pose) {
+            const nose = pose.keypoints.find(k => k.name === 'nose');
+            return nose && nose.confidence > 0.3 ? { x: nose.x, y: nose.y } : null;
+        }
+
+        function calculateDistance(p1, p2) {
+            return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+        }
+
+        function updateTracking() {
+            const now = Date.now();
+            const matchThreshold = 100; // ピクセル
+
+            // 現在のポーズを既存の人物とマッチング
+            const usedPoses = new Set();
+
+            for (let id in trackedPersons) {
+                const person = trackedPersons[id];
+                let bestMatch = null;
+                let bestDistance = Infinity;
+
+                for (let i = 0; i < poses.length; i++) {
+                    if (usedPoses.has(i)) continue;
+
+                    const nose = getNosePosition(poses[i]);
+                    if (!nose) continue;
+
+                    const distance = calculateDistance(person.position, nose);
+                    if (distance < bestDistance && distance < matchThreshold) {
+                        bestDistance = distance;
+                        bestMatch = i;
+                    }
+                }
+
+                if (bestMatch !== null) {
+                    usedPoses.add(bestMatch);
+                    const nose = getNosePosition(poses[bestMatch]);
+                    person.position = nose;
+                    person.pose = poses[bestMatch];
+                    person.lastSeen = now;
+                    person.active = true;
+
+                    // 統計更新
+                    updatePersonStats(person);
+                } else {
+                    person.active = false;
+                }
+            }
+
+            // 新しい人物を追加
+            for (let i = 0; i < poses.length; i++) {
+                if (usedPoses.has(i)) continue;
+
+                const nose = getNosePosition(poses[i]);
+                if (!nose) continue;
+
+                const newId = `person_${personIdCounter++}`;
+                trackedPersons[newId] = {
+                    id: newId,
+                    color: personColors[Object.keys(trackedPersons).length % personColors.length],
+                    position: nose,
+                    pose: poses[i],
+                    lastSeen: now,
+                    active: true,
+                    stats: {
+                        armRaised: false,
+                        moving: false,
+                        posture: 'unknown'
+                    },
+                    history: []
+                };
+            }
+
+            // 古い人物を削除
+            for (let id in trackedPersons) {
+                if (now - trackedPersons[id].lastSeen > 2000) {
+                    delete trackedPersons[id];
+                }
+            }
+
+            updateUI();
+        }
+
+        function updatePersonStats(person) {
+            const pose = person.pose;
+
+            // 腕を上げているか
+            const leftWrist = pose.keypoints.find(k => k.name === 'left_wrist');
+            const rightWrist = pose.keypoints.find(k => k.name === 'right_wrist');
+            const leftShoulder = pose.keypoints.find(k => k.name === 'left_shoulder');
+
+            if (leftWrist && rightWrist && leftShoulder) {
+                person.stats.armRaised = leftWrist.y < leftShoulder.y || rightWrist.y < leftShoulder.y;
+            }
+
+            // 移動検出
+            person.history.push({ ...person.position, time: Date.now() });
+            if (person.history.length > 10) person.history.shift();
+
+            if (person.history.length >= 2) {
+                const first = person.history[0];
+                const last = person.history[person.history.length - 1];
+                const distance = calculateDistance(first, last);
+                person.stats.moving = distance > 30;
+            }
+
+            // 姿勢判定
+            const leftHip = pose.keypoints.find(k => k.name === 'left_hip');
+            const leftKnee = pose.keypoints.find(k => k.name === 'left_knee');
+
+            if (leftHip && leftKnee && leftHip.confidence > 0.3 && leftKnee.confidence > 0.3) {
+                const kneeBend = leftKnee.y - leftHip.y;
+                if (kneeBend < 80) {
+                    person.stats.posture = 'しゃがんでいる';
+                } else if (person.stats.armRaised) {
+                    person.stats.posture = '手を上げている';
+                } else {
+                    person.stats.posture = '立っている';
+                }
+            }
+        }
+
+        function updateUI() {
+            const activePersons = Object.values(trackedPersons).filter(p => p.active);
+            personCount.textContent = activePersons.length;
+
+            if (activePersons.length === 0) {
+                personList.innerHTML = '<p style="color: #8b949e;">人物を検出中...</p>';
+                return;
+            }
+
+            personList.innerHTML = activePersons.map((person, index) => `
+                <div class="person-card" style="border-color: ${person.color}">
+                    <div class="person-header">
+                        <span class="person-id" style="color: ${person.color}">人物 ${index + 1}</span>
+                        <span class="person-status" style="background: ${person.stats.moving ? '#f39c12' : '#4ecca3'}">
+                            ${person.stats.moving ? '移動中' : '静止'}
+                        </span>
+                    </div>
+                    <div class="person-stats">
+                        <div class="stat">
+                            <div class="stat-label">位置</div>
+                            <div class="stat-value">${Math.round(person.position.x)}, ${Math.round(person.position.y)}</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-label">姿勢</div>
+                            <div class="stat-value">${person.stats.posture}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            // 各人物を描画
+            for (let id in trackedPersons) {
+                const person = trackedPersons[id];
+                if (!person.active) continue;
+
+                const pose = person.pose;
+                const color = person.color;
+
+                // スケルトン
+                const connections = [
+                    ['left_shoulder', 'right_shoulder'],
+                    ['left_shoulder', 'left_elbow'],
+                    ['left_elbow', 'left_wrist'],
+                    ['right_shoulder', 'right_elbow'],
+                    ['right_elbow', 'right_wrist'],
+                    ['left_shoulder', 'left_hip'],
+                    ['right_shoulder', 'right_hip'],
+                    ['left_hip', 'right_hip'],
+                    ['left_hip', 'left_knee'],
+                    ['left_knee', 'left_ankle'],
+                    ['right_hip', 'right_knee'],
+                    ['right_knee', 'right_ankle']
+                ];
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+
+                for (let [start, end] of connections) {
+                    const s = pose.keypoints.find(k => k.name === start);
+                    const e = pose.keypoints.find(k => k.name === end);
+                    if (s && e && s.confidence > 0.3 && e.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.moveTo(canvas.width - s.x, s.y);
+                        ctx.lineTo(canvas.width - e.x, e.y);
+                        ctx.stroke();
+                    }
+                }
+
+                // キーポイント
+                for (let kp of pose.keypoints) {
+                    if (kp.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width - kp.x, kp.y, 5, 0, 2 * Math.PI);
+                        ctx.fillStyle = color;
+                        ctx.fill();
+                    }
+                }
+
+                // ラベル
+                const nose = pose.keypoints.find(k => k.name === 'nose');
+                if (nose && nose.confidence > 0.3) {
+                    ctx.fillStyle = color;
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillText(`人物 ${Object.keys(trackedPersons).indexOf(id) + 1}`,
+                        canvas.width - nose.x - 30, nose.y - 30);
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

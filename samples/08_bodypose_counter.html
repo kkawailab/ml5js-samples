@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 - BodyPose スクワットカウンター</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #0d1117; color: white; }
+        .container { display: flex; justify-content: center; gap: 30px; flex-wrap: wrap; }
+        canvas { border-radius: 10px; }
+        .stats { background: #161b22; padding: 20px; border-radius: 15px; min-width: 200px; }
+        .count { font-size: 72px; color: #58a6ff; font-weight: bold; }
+        .label { font-size: 18px; color: #8b949e; }
+        .status { padding: 10px; margin-top: 10px; border-radius: 8px; }
+        .up { background: #238636; }
+        .down { background: #da3633; }
+        button { padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; margin: 10px; }
+        .reset-btn { background: #6e7681; color: white; }
+    </style>
+</head>
+<body>
+    <h1>スクワットカウンター</h1>
+    <p>膝を曲げてスクワットをするとカウントされます</p>
+
+    <div class="container">
+        <canvas id="canvas"></canvas>
+        <div class="stats">
+            <div class="label">回数</div>
+            <div class="count" id="count">0</div>
+            <div class="status up" id="status">立っている</div>
+            <button class="reset-btn" onclick="resetCount()">リセット</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const countDiv = document.getElementById('count');
+        const statusDiv = document.getElementById('status');
+
+        let video;
+        let bodyPose;
+        let poses = [];
+        let count = 0;
+        let isDown = false;
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+            canvas.width = 640;
+            canvas.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet');
+            detectPose();
+        }
+
+        async function detectPose() {
+            poses = await bodyPose.detect(video);
+            checkSquat();
+            draw();
+            requestAnimationFrame(detectPose);
+        }
+
+        function getKeypoint(name) {
+            if (poses.length === 0) return null;
+            return poses[0].keypoints.find(k => k.name === name);
+        }
+
+        function checkSquat() {
+            const leftHip = getKeypoint('left_hip');
+            const leftKnee = getKeypoint('left_knee');
+            const rightHip = getKeypoint('right_hip');
+            const rightKnee = getKeypoint('right_knee');
+
+            if (!leftHip || !leftKnee || !rightHip || !rightKnee) return;
+            if (leftHip.confidence < 0.3 || leftKnee.confidence < 0.3) return;
+
+            // 膝と腰のY座標の差でスクワットを判定
+            const leftDiff = leftKnee.y - leftHip.y;
+            const rightDiff = rightKnee.y - rightHip.y;
+            const avgDiff = (leftDiff + rightDiff) / 2;
+
+            // スクワット判定（膝が腰より下にあり、差が小さい=しゃがんでいる）
+            const squatThreshold = 100; // この値以下ならスクワット中
+
+            if (avgDiff < squatThreshold && !isDown) {
+                isDown = true;
+                statusDiv.textContent = 'しゃがんでいる';
+                statusDiv.className = 'status down';
+            } else if (avgDiff >= squatThreshold && isDown) {
+                isDown = false;
+                count++;
+                countDiv.textContent = count;
+                statusDiv.textContent = '立っている';
+                statusDiv.className = 'status up';
+            }
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (poses.length > 0) {
+                const pose = poses[0];
+                for (let keypoint of pose.keypoints) {
+                    if (keypoint.confidence > 0.3) {
+                        const x = canvas.width - keypoint.x;
+                        ctx.beginPath();
+                        ctx.arc(x, keypoint.y, 6, 0, 2 * Math.PI);
+                        ctx.fillStyle = isDown ? '#da3633' : '#58a6ff';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        function resetCount() {
+            count = 0;
+            countDiv.textContent = '0';
+        }
+
+        setup();
+    </script>
+</body>
+</html>

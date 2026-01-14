@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 - Image Classifier 基本</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+        #result { margin-top: 20px; font-size: 24px; }
+        img { max-width: 400px; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <h1>画像分類 - 基本</h1>
+    <p>MobileNetを使って画像を分類します</p>
+
+    <img id="image" src="https://upload.wikimedia.org/wikipedia/commons/thumb/3/3a/Cat03.jpg/1200px-Cat03.jpg" crossorigin="anonymous">
+
+    <div id="result">分類中...</div>
+
+    <script>
+        const image = document.getElementById('image');
+        const resultDiv = document.getElementById('result');
+
+        // 画像が読み込まれたら分類開始
+        image.onload = async function() {
+            // MobileNetで画像分類器を初期化
+            const classifier = await ml5.imageClassifier('MobileNet');
+
+            // 画像を分類
+            const results = await classifier.classify(image);
+
+            // 結果を表示
+            resultDiv.innerHTML = `
+                <p><strong>結果:</strong> ${results[0].label}</p>
+                <p><strong>確信度:</strong> ${(results[0].confidence * 100).toFixed(2)}%</p>
+            `;
+        };
+    </script>
+</body>
+</html>

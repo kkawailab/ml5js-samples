@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>19 - 音声ビジュアライザー + 分類</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #0a0a0a; color: white; margin: 0; overflow: hidden; }
+        canvas { display: block; margin: 0 auto; }
+        #overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; }
+        #classification { font-size: 120px; text-shadow: 0 0 50px currentColor; transition: all 0.2s; }
+        #confidence { font-size: 24px; color: #666; margin-top: 10px; }
+        button { padding: 20px 40px; font-size: 20px; border: none; border-radius: 15px; cursor: pointer; background: #1db954; color: white; position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 20; }
+        button:hover { background: #1ed760; }
+        #instructions { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); color: #666; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div id="overlay">
+        <div id="classification">🎤</div>
+        <div id="confidence">マイクを有効にしてください</div>
+    </div>
+
+    <button id="startBtn">🎤 開始</button>
+
+    <div id="instructions">話しかけると認識します（yes, no, up, down, left, right, go, stop など）</div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const classification = document.getElementById('classification');
+        const confidence = document.getElementById('confidence');
+        const startBtn = document.getElementById('startBtn');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let soundClassifier;
+        let audioContext;
+        let analyser;
+        let dataArray;
+        let isRunning = false;
+
+        const colors = {
+            yes: '#4ecca3',
+            no: '#ff6b6b',
+            up: '#45b7d1',
+            down: '#f39c12',
+            left: '#9b59b6',
+            right: '#e84393',
+            go: '#2ecc71',
+            stop: '#e74c3c',
+            _background_noise_: '#333',
+            _unknown_: '#666'
+        };
+
+        const emojis = {
+            yes: '✅',
+            no: '❌',
+            up: '⬆️',
+            down: '⬇️',
+            left: '⬅️',
+            right: '➡️',
+            go: '🏃',
+            stop: '🛑',
+            _background_noise_: '🔇',
+            _unknown_: '❓'
+        };
+
+        startBtn.onclick = async function() {
+            if (isRunning) {
+                isRunning = false;
+                startBtn.textContent = '🎤 開始';
+                return;
+            }
+
+            startBtn.textContent = '読み込み中...';
+
+            try {
+                // 音声分類器を初期化
+                soundClassifier = await ml5.soundClassifier('SpeechCommands18w');
+
+                // オーディオコンテキストを設定
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                isRunning = true;
+                startBtn.textContent = '⏹ 停止';
+
+                classify();
+                animate();
+
+            } catch (error) {
+                console.error(error);
+                confidence.textContent = 'マイクのアクセスを許可してください';
+                startBtn.textContent = '🎤 開始';
+            }
+        };
+
+        async function classify() {
+            if (!isRunning) return;
+
+            try {
+                const results = await soundClassifier.classify();
+
+                if (results && results.length > 0) {
+                    const label = results[0].label;
+                    const conf = results[0].confidence;
+
+                    classification.textContent = emojis[label] || label;
+                    classification.style.color = colors[label] || '#fff';
+                    confidence.textContent = `${label} (${(conf * 100).toFixed(0)}%)`;
+                }
+            } catch (e) {
+                // 続行
+            }
+
+            setTimeout(classify, 100);
+        }
+
+        function animate() {
+            if (!isRunning) {
+                ctx.fillStyle = '#0a0a0a';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                return;
+            }
+
+            requestAnimationFrame(animate);
+
+            analyser.getByteFrequencyData(dataArray);
+
+            // 背景
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 円形ビジュアライザー
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const baseRadius = 150;
+
+            ctx.beginPath();
+            for (let i = 0; i < dataArray.length; i++) {
+                const angle = (i / dataArray.length) * Math.PI * 2;
+                const amplitude = dataArray[i] / 255;
+                const radius = baseRadius + amplitude * 150;
+
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.closePath();
+
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 300);
+            gradient.addColorStop(0, 'rgba(78, 204, 163, 0.3)');
+            gradient.addColorStop(1, 'rgba(78, 204, 163, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fill();
+
+            ctx.strokeStyle = '#4ecca3';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // バー表示
+            const barWidth = canvas.width / dataArray.length;
+            for (let i = 0; i < dataArray.length; i++) {
+                const barHeight = (dataArray[i] / 255) * 100;
+                const hue = (i / dataArray.length) * 360;
+
+                ctx.fillStyle = `hsla(${hue}, 70%, 50%, 0.5)`;
+                ctx.fillRect(
+                    i * barWidth,
+                    canvas.height - barHeight,
+                    barWidth - 1,
+                    barHeight
+                );
+            }
+        }
+
+        // リサイズ対応
+        window.onresize = () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        };
+    </script>
+</body>
+</html>

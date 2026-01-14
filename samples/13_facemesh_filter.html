@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>13 - FaceMesh フェイスフィルター</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: linear-gradient(135deg, #ff9a9e 0%, #fad0c4 100%); min-height: 100vh; margin: 0; }
+        canvas { border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        .filters { margin: 20px 0; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+        .filter-btn { padding: 15px 25px; font-size: 16px; border: none; border-radius: 25px; cursor: pointer; background: white; color: #333; transition: all 0.3s; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .filter-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.15); }
+        .filter-btn.active { background: #ff6b6b; color: white; }
+        h1 { color: #333; }
+    </style>
+</head>
+<body>
+    <h1>フェイスフィルター</h1>
+
+    <div class="filters">
+        <button class="filter-btn active" data-filter="glasses">🕶️ サングラス</button>
+        <button class="filter-btn" data-filter="cat">🐱 猫耳</button>
+        <button class="filter-btn" data-filter="dog">🐶 犬</button>
+        <button class="filter-btn" data-filter="hearts">💕 ハート</button>
+        <button class="filter-btn" data-filter="crown">👑 王冠</button>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const filterBtns = document.querySelectorAll('.filter-btn');
+
+        canvas.width = 640;
+        canvas.height = 480;
+
+        let video;
+        let faceMesh;
+        let faces = [];
+        let currentFilter = 'glasses';
+
+        filterBtns.forEach(btn => {
+            btn.onclick = () => {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+            };
+        });
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            faceMesh = await ml5.faceMesh();
+            detectFaces();
+        }
+
+        async function detectFaces() {
+            faces = await faceMesh.detect(video);
+            draw();
+            requestAnimationFrame(detectFaces);
+        }
+
+        function getPoint(face, index) {
+            const kp = face.keypoints[index];
+            return { x: canvas.width - kp.x, y: kp.y };
+        }
+
+        function drawFilter(face) {
+            const leftEye = getPoint(face, 33);
+            const rightEye = getPoint(face, 263);
+            const nose = getPoint(face, 1);
+            const forehead = getPoint(face, 10);
+            const leftCheek = getPoint(face, 234);
+            const rightCheek = getPoint(face, 454);
+
+            const eyeDistance = Math.sqrt((rightEye.x - leftEye.x) ** 2 + (rightEye.y - leftEye.y) ** 2);
+            const faceWidth = Math.sqrt((rightCheek.x - leftCheek.x) ** 2 + (rightCheek.y - leftCheek.y) ** 2);
+
+            ctx.save();
+
+            switch (currentFilter) {
+                case 'glasses':
+                    const glassesWidth = eyeDistance * 2.5;
+                    const glassesHeight = eyeDistance * 0.8;
+                    const glassesY = (leftEye.y + rightEye.y) / 2;
+                    const glassesX = (leftEye.x + rightEye.x) / 2;
+
+                    ctx.font = `${glassesWidth * 0.6}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('🕶️', glassesX, glassesY);
+                    break;
+
+                case 'cat':
+                    const earSize = eyeDistance * 0.8;
+                    ctx.font = `${earSize}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('🐱', (leftEye.x + rightEye.x) / 2, forehead.y - earSize * 0.3);
+
+                    // 髭
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    for (let i = -1; i <= 1; i++) {
+                        // 左髭
+                        ctx.beginPath();
+                        ctx.moveTo(leftCheek.x + 20, nose.y + i * 15);
+                        ctx.lineTo(leftCheek.x - 40, nose.y + i * 15 + i * 5);
+                        ctx.stroke();
+                        // 右髭
+                        ctx.beginPath();
+                        ctx.moveTo(rightCheek.x - 20, nose.y + i * 15);
+                        ctx.lineTo(rightCheek.x + 40, nose.y + i * 15 + i * 5);
+                        ctx.stroke();
+                    }
+                    break;
+
+                case 'dog':
+                    const dogSize = eyeDistance * 1.5;
+                    ctx.font = `${dogSize}px Arial`;
+                    ctx.textAlign = 'center';
+                    // 耳
+                    ctx.fillText('🐕', (leftEye.x + rightEye.x) / 2, forehead.y - dogSize * 0.2);
+                    // 鼻
+                    ctx.font = `${dogSize * 0.4}px Arial`;
+                    ctx.fillText('🐽', nose.x, nose.y + 10);
+                    // 舌
+                    ctx.fillText('👅', nose.x, nose.y + eyeDistance * 0.8);
+                    break;
+
+                case 'hearts':
+                    ctx.font = `${eyeDistance * 0.5}px Arial`;
+                    for (let i = 0; i < 5; i++) {
+                        const angle = (i / 5) * Math.PI * 2;
+                        const radius = faceWidth * 0.7;
+                        const hx = (leftEye.x + rightEye.x) / 2 + Math.cos(angle) * radius;
+                        const hy = nose.y + Math.sin(angle) * radius * 0.8;
+                        ctx.fillText('💕', hx, hy);
+                    }
+                    break;
+
+                case 'crown':
+                    const crownSize = eyeDistance * 1.2;
+                    ctx.font = `${crownSize}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('👑', (leftEye.x + rightEye.x) / 2, forehead.y - crownSize * 0.6);
+                    break;
+            }
+
+            ctx.restore();
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            for (let face of faces) {
+                drawFilter(face);
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

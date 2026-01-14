@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>24 - FaceMesh 頭の向き推定</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #0a0a0a; color: white; text-align: center; }
+        .container { display: flex; justify-content: center; gap: 30px; flex-wrap: wrap; }
+        canvas { border-radius: 15px; }
+
+        .panel { background: #1a1a1a; padding: 25px; border-radius: 15px; min-width: 280px; }
+        .panel h3 { margin-top: 0; color: #58a6ff; }
+
+        .axis-display { display: flex; justify-content: space-around; margin: 20px 0; }
+        .axis { text-align: center; }
+        .axis-value { font-size: 32px; font-weight: bold; }
+        .axis-label { font-size: 12px; color: #888; margin-top: 5px; }
+
+        .head-3d { width: 200px; height: 200px; margin: 20px auto; perspective: 500px; }
+        .head-cube { width: 100px; height: 100px; margin: 50px auto; position: relative; transform-style: preserve-3d; transition: transform 0.1s; }
+        .cube-face { position: absolute; width: 100px; height: 100px; border: 2px solid #333; display: flex; align-items: center; justify-content: center; font-size: 40px; background: rgba(102, 126, 234, 0.3); }
+        .front { transform: translateZ(50px); }
+        .back { transform: rotateY(180deg) translateZ(50px); }
+        .right { transform: rotateY(90deg) translateZ(50px); }
+        .left { transform: rotateY(-90deg) translateZ(50px); }
+        .top { transform: rotateX(90deg) translateZ(50px); }
+        .bottom { transform: rotateX(-90deg) translateZ(50px); }
+
+        .direction-indicator { margin: 20px 0; padding: 15px; background: #21262d; border-radius: 10px; }
+        .direction-text { font-size: 24px; font-weight: bold; }
+        .direction-emoji { font-size: 48px; }
+
+        #status { color: #4ecca3; margin: 10px 0; }
+
+        .meter { height: 10px; background: #333; border-radius: 5px; margin: 10px 0; overflow: hidden; }
+        .meter-fill { height: 100%; transition: width 0.1s, background 0.1s; }
+    </style>
+</head>
+<body>
+    <h1>頭の向き推定</h1>
+    <p>顔のランドマークから頭の回転角度を推定します</p>
+
+    <div class="container">
+        <canvas id="canvas" width="640" height="480"></canvas>
+
+        <div class="panel">
+            <h3>回転角度</h3>
+
+            <div class="axis-display">
+                <div class="axis">
+                    <div class="axis-value" id="yawValue" style="color: #ff6b6b">0°</div>
+                    <div class="axis-label">Yaw (左右)</div>
+                </div>
+                <div class="axis">
+                    <div class="axis-value" id="pitchValue" style="color: #4ecdc4">0°</div>
+                    <div class="axis-label">Pitch (上下)</div>
+                </div>
+                <div class="axis">
+                    <div class="axis-value" id="rollValue" style="color: #f9ca24">0°</div>
+                    <div class="axis-label">Roll (傾き)</div>
+                </div>
+            </div>
+
+            <div class="head-3d">
+                <div class="head-cube" id="headCube">
+                    <div class="cube-face front">😊</div>
+                    <div class="cube-face back">🔙</div>
+                    <div class="cube-face right">→</div>
+                    <div class="cube-face left">←</div>
+                    <div class="cube-face top">↑</div>
+                    <div class="cube-face bottom">↓</div>
+                </div>
+            </div>
+
+            <div class="direction-indicator">
+                <div class="direction-emoji" id="directionEmoji">😊</div>
+                <div class="direction-text" id="directionText">正面</div>
+            </div>
+
+            <h3>注視度</h3>
+            <div style="text-align: left;">
+                <div>画面注視度</div>
+                <div class="meter">
+                    <div class="meter-fill" id="attentionMeter" style="width: 0%; background: #4ecca3;"></div>
+                </div>
+            </div>
+
+            <div id="status">読み込み中...</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const yawValue = document.getElementById('yawValue');
+        const pitchValue = document.getElementById('pitchValue');
+        const rollValue = document.getElementById('rollValue');
+        const headCube = document.getElementById('headCube');
+        const directionEmoji = document.getElementById('directionEmoji');
+        const directionText = document.getElementById('directionText');
+        const attentionMeter = document.getElementById('attentionMeter');
+        const status = document.getElementById('status');
+
+        let video;
+        let faceMesh;
+        let faces = [];
+
+        // 重要なランドマークのインデックス
+        const landmarks = {
+            nose: 1,
+            leftEye: 33,
+            rightEye: 263,
+            leftMouth: 61,
+            rightMouth: 291,
+            chin: 152,
+            forehead: 10,
+            leftCheek: 234,
+            rightCheek: 454
+        };
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            faceMesh = await ml5.faceMesh();
+            status.textContent = '準備完了！';
+
+            detectFaces();
+        }
+
+        async function detectFaces() {
+            faces = await faceMesh.detect(video);
+            analyzeHeadPose();
+            draw();
+            requestAnimationFrame(detectFaces);
+        }
+
+        function getPoint(index) {
+            if (faces.length === 0) return null;
+            const kp = faces[0].keypoints[index];
+            return { x: kp.x, y: kp.y, z: kp.z || 0 };
+        }
+
+        function analyzeHeadPose() {
+            if (faces.length === 0) {
+                directionText.textContent = '顔を検出中...';
+                directionEmoji.textContent = '❓';
+                return;
+            }
+
+            const nose = getPoint(landmarks.nose);
+            const leftEye = getPoint(landmarks.leftEye);
+            const rightEye = getPoint(landmarks.rightEye);
+            const leftMouth = getPoint(landmarks.leftMouth);
+            const rightMouth = getPoint(landmarks.rightMouth);
+            const chin = getPoint(landmarks.chin);
+            const forehead = getPoint(landmarks.forehead);
+
+            if (!nose || !leftEye || !rightEye) return;
+
+            // Yaw (左右の回転) - 目の間の中心と鼻の位置の差
+            const eyeCenter = { x: (leftEye.x + rightEye.x) / 2, y: (leftEye.y + rightEye.y) / 2 };
+            const eyeDistance = Math.abs(rightEye.x - leftEye.x);
+            const yaw = ((nose.x - eyeCenter.x) / eyeDistance) * 60;
+
+            // Pitch (上下の回転) - 鼻と目の中心、顎の位置関係
+            const faceHeight = chin.y - forehead.y;
+            const noseRatio = (nose.y - forehead.y) / faceHeight;
+            const pitch = (noseRatio - 0.45) * 100;
+
+            // Roll (傾き) - 目の傾き
+            const roll = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x) * (180 / Math.PI);
+
+            // 値を更新
+            yawValue.textContent = `${yaw.toFixed(0)}°`;
+            pitchValue.textContent = `${pitch.toFixed(0)}°`;
+            rollValue.textContent = `${roll.toFixed(0)}°`;
+
+            // 3Dキューブを回転
+            headCube.style.transform = `rotateY(${-yaw}deg) rotateX(${pitch}deg) rotateZ(${roll}deg)`;
+
+            // 向きの判定
+            let direction = '正面';
+            let emoji = '😊';
+
+            if (Math.abs(yaw) > 15 || Math.abs(pitch) > 15) {
+                if (yaw < -15) { direction = '右を向いている'; emoji = '👉'; }
+                else if (yaw > 15) { direction = '左を向いている'; emoji = '👈'; }
+                else if (pitch < -15) { direction = '上を向いている'; emoji = '👆'; }
+                else if (pitch > 15) { direction = '下を向いている'; emoji = '👇'; }
+            }
+
+            directionText.textContent = direction;
+            directionEmoji.textContent = emoji;
+
+            // 注視度（正面を向いているほど高い）
+            const attention = Math.max(0, 100 - Math.abs(yaw) * 2 - Math.abs(pitch) * 2);
+            attentionMeter.style.width = `${attention}%`;
+            attentionMeter.style.background = attention > 70 ? '#4ecca3' : attention > 40 ? '#f39c12' : '#e74c3c';
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (faces.length > 0) {
+                const face = faces[0];
+
+                // 顔のメッシュを描画
+                ctx.fillStyle = 'rgba(102, 126, 234, 0.3)';
+                for (let kp of face.keypoints) {
+                    ctx.beginPath();
+                    ctx.arc(canvas.width - kp.x, kp.y, 1, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+
+                // 重要なポイントを強調
+                const importantPoints = [
+                    landmarks.nose,
+                    landmarks.leftEye,
+                    landmarks.rightEye,
+                    landmarks.chin,
+                    landmarks.forehead
+                ];
+
+                ctx.fillStyle = '#ff6b6b';
+                for (let idx of importantPoints) {
+                    const kp = face.keypoints[idx];
+                    ctx.beginPath();
+                    ctx.arc(canvas.width - kp.x, kp.y, 5, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+
+                // 顔の軸を描画
+                const nose = getPoint(landmarks.nose);
+                const forehead = getPoint(landmarks.forehead);
+                const chin = getPoint(landmarks.chin);
+
+                // 縦軸
+                ctx.strokeStyle = '#4ecdc4';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(canvas.width - forehead.x, forehead.y);
+                ctx.lineTo(canvas.width - chin.x, chin.y);
+                ctx.stroke();
+
+                // 横軸（目）
+                const leftEye = getPoint(landmarks.leftEye);
+                const rightEye = getPoint(landmarks.rightEye);
+                ctx.strokeStyle = '#ff6b6b';
+                ctx.beginPath();
+                ctx.moveTo(canvas.width - leftEye.x, leftEye.y);
+                ctx.lineTo(canvas.width - rightEye.x, rightEye.y);
+                ctx.stroke();
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

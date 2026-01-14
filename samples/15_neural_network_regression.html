@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>15 - Neural Network 回帰（価格予測）</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #0f0f23; color: white; }
+        .container { max-width: 700px; margin: 0 auto; }
+        .input-group { background: #1a1a3e; padding: 20px; border-radius: 15px; margin: 20px 0; }
+        label { display: block; margin: 10px 0 5px; color: #a0a0a0; }
+        input[type="number"] { width: 100%; padding: 12px; font-size: 16px; border: none; border-radius: 8px; background: #2a2a4e; color: white; box-sizing: border-box; }
+        button { padding: 15px 30px; font-size: 16px; border: none; border-radius: 10px; cursor: pointer; margin: 10px; transition: all 0.3s; }
+        .add-btn { background: #667eea; color: white; }
+        .train-btn { background: #4ecca3; color: #0f0f23; }
+        .predict-btn { background: #ff6b6b; color: white; }
+        #result { font-size: 36px; margin: 30px 0; padding: 30px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 15px; }
+        #status { color: #4ecca3; margin: 15px 0; }
+        #dataList { max-height: 200px; overflow-y: auto; background: #1a1a3e; border-radius: 10px; padding: 15px; margin: 20px 0; }
+        .data-item { padding: 8px; border-bottom: 1px solid #2a2a4e; font-size: 14px; }
+        h1 { color: #667eea; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 住宅価格予測</h1>
+        <p>面積と築年数から価格を予測するニューラルネットワーク</p>
+
+        <div class="input-group">
+            <label>面積（平方メートル）</label>
+            <input type="number" id="area" value="80" min="20" max="300">
+
+            <label>築年数（年）</label>
+            <input type="number" id="age" value="10" min="0" max="50">
+
+            <label>価格（万円）- 訓練データ追加時のみ</label>
+            <input type="number" id="price" value="3000" min="500" max="20000">
+        </div>
+
+        <button class="add-btn" onclick="addData()">訓練データ追加</button>
+        <button class="train-btn" onclick="trainModel()">訓練開始</button>
+        <button class="predict-btn" onclick="predict()">価格を予測</button>
+
+        <div id="status">訓練データを追加してください（最低10件推奨）</div>
+
+        <div id="dataList">
+            <strong>訓練データ一覧</strong>
+            <div id="dataItems"></div>
+        </div>
+
+        <div id="result">予測価格: -</div>
+    </div>
+
+    <script>
+        const areaInput = document.getElementById('area');
+        const ageInput = document.getElementById('age');
+        const priceInput = document.getElementById('price');
+        const status = document.getElementById('status');
+        const result = document.getElementById('result');
+        const dataItems = document.getElementById('dataItems');
+
+        let nn;
+        let trainingData = [];
+
+        // ニューラルネットワークを初期化
+        function initNN() {
+            const options = {
+                inputs: ['area', 'age'],
+                outputs: ['price'],
+                task: 'regression'
+            };
+            nn = ml5.neuralNetwork(options);
+        }
+        initNN();
+
+        // サンプルデータを追加
+        function addSampleData() {
+            const samples = [
+                { area: 50, age: 5, price: 2500 },
+                { area: 70, age: 10, price: 2800 },
+                { area: 90, age: 3, price: 4500 },
+                { area: 120, age: 15, price: 4000 },
+                { area: 60, age: 20, price: 2000 },
+                { area: 100, age: 8, price: 4200 },
+                { area: 80, age: 12, price: 3200 },
+                { area: 150, age: 5, price: 6000 },
+                { area: 40, age: 25, price: 1500 },
+                { area: 110, age: 2, price: 5500 }
+            ];
+
+            samples.forEach(s => {
+                nn.addData(
+                    { area: s.area / 300, age: s.age / 50 },
+                    { price: s.price / 10000 }
+                );
+                trainingData.push(s);
+            });
+            updateDataList();
+            status.textContent = `サンプルデータ${samples.length}件を追加しました`;
+        }
+
+        // 訓練データを追加
+        function addData() {
+            const area = parseFloat(areaInput.value);
+            const age = parseFloat(ageInput.value);
+            const price = parseFloat(priceInput.value);
+
+            if (isNaN(area) || isNaN(age) || isNaN(price)) {
+                status.textContent = 'すべての値を入力してください';
+                return;
+            }
+
+            // 正規化してデータを追加
+            nn.addData(
+                { area: area / 300, age: age / 50 },
+                { price: price / 10000 }
+            );
+            trainingData.push({ area, age, price });
+
+            updateDataList();
+            status.textContent = `データを追加しました（計${trainingData.length}件）`;
+        }
+
+        function updateDataList() {
+            dataItems.innerHTML = trainingData.map((d, i) =>
+                `<div class="data-item">${i + 1}. 面積: ${d.area}㎡, 築: ${d.age}年 → ${d.price}万円</div>`
+            ).join('');
+        }
+
+        // モデルを訓練
+        async function trainModel() {
+            if (trainingData.length < 5) {
+                status.textContent = '少なくとも5件のデータが必要です';
+                return;
+            }
+
+            status.textContent = '訓練中...';
+
+            nn.normalizeData();
+
+            await nn.train({ epochs: 100 }, (epoch, loss) => {
+                if (epoch % 20 === 0) {
+                    status.textContent = `訓練中... エポック: ${epoch}, 損失: ${loss.loss.toFixed(6)}`;
+                }
+            });
+
+            status.textContent = '訓練完了！面積と築年数を入力して予測してください';
+        }
+
+        // 予測
+        async function predict() {
+            const area = parseFloat(areaInput.value);
+            const age = parseFloat(ageInput.value);
+
+            if (isNaN(area) || isNaN(age)) {
+                result.textContent = '面積と築年数を入力してください';
+                return;
+            }
+
+            try {
+                const results = await nn.predict({ area: area / 300, age: age / 50 });
+                const predictedPrice = Math.round(results[0].price * 10000);
+                result.innerHTML = `予測価格: <strong>${predictedPrice.toLocaleString()}</strong>万円`;
+            } catch (error) {
+                result.textContent = 'まず訓練を行ってください';
+            }
+        }
+
+        // 初期サンプルデータを追加
+        addSampleData();
+    </script>
+</body>
+</html>

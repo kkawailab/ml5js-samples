@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>29 - AI お絵かきアシスタント</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #1a1a2e; color: white; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; color: #667eea; }
+        .main { display: grid; grid-template-columns: 1fr 300px; gap: 20px; }
+        @media (max-width: 900px) { .main { grid-template-columns: 1fr; } }
+
+        .canvas-area { position: relative; }
+        #drawCanvas { background: white; border-radius: 15px; cursor: crosshair; display: block; }
+        .toolbar { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; justify-content: center; }
+        .tool-btn { padding: 10px 15px; border: 2px solid #333; border-radius: 8px; background: #16213e; color: white; cursor: pointer; transition: all 0.3s; }
+        .tool-btn:hover { border-color: #667eea; }
+        .tool-btn.active { background: #667eea; border-color: #667eea; }
+        .color-picker { display: flex; gap: 5px; align-items: center; }
+        .color-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+        .color-btn.active { border-color: white; transform: scale(1.2); }
+        input[type="range"] { width: 100px; }
+
+        .panel { background: #16213e; padding: 20px; border-radius: 15px; }
+        .panel h3 { margin-top: 0; color: #667eea; border-bottom: 1px solid #333; padding-bottom: 10px; }
+
+        .prediction-box { background: #0f3460; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px; }
+        .prediction-text { font-size: 24px; font-weight: bold; color: #4ecca3; }
+        .confidence-text { font-size: 14px; color: #888; margin-top: 5px; }
+
+        .suggestions { margin-bottom: 20px; }
+        .suggestion-item { padding: 10px; background: #0f3460; border-radius: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .suggestion-bar { width: 100px; height: 8px; background: #333; border-radius: 4px; overflow: hidden; }
+        .suggestion-fill { height: 100%; background: #667eea; }
+
+        .actions button { width: 100%; padding: 12px; margin-bottom: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .clear-btn { background: #e74c3c; color: white; }
+        .save-btn { background: #27ae60; color: white; }
+
+        #status { text-align: center; color: #4ecca3; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 AI お絵かきアシスタント</h1>
+        <p style="text-align: center;">描いている途中でAIが何を描いているか予測します</p>
+
+        <div class="main">
+            <div class="canvas-area">
+                <div class="toolbar">
+                    <div class="color-picker">
+                        <button class="color-btn active" style="background: #000" data-color="#000000"></button>
+                        <button class="color-btn" style="background: #e74c3c" data-color="#e74c3c"></button>
+                        <button class="color-btn" style="background: #3498db" data-color="#3498db"></button>
+                        <button class="color-btn" style="background: #27ae60" data-color="#27ae60"></button>
+                        <button class="color-btn" style="background: #f39c12" data-color="#f39c12"></button>
+                        <button class="color-btn" style="background: #9b59b6" data-color="#9b59b6"></button>
+                    </div>
+                    <div>
+                        <label>太さ: </label>
+                        <input type="range" id="brushSize" min="2" max="30" value="8">
+                    </div>
+                    <button class="tool-btn active" data-tool="brush">🖌️ ブラシ</button>
+                    <button class="tool-btn" data-tool="eraser">🧹 消しゴム</button>
+                </div>
+                <canvas id="drawCanvas" width="640" height="480"></canvas>
+                <div id="status">描き始めるとAIが予測します</div>
+            </div>
+
+            <div class="panel">
+                <h3>🤖 AI予測</h3>
+                <div class="prediction-box">
+                    <div class="prediction-text" id="topPrediction">?</div>
+                    <div class="confidence-text" id="topConfidence">描いてください</div>
+                </div>
+
+                <div class="suggestions">
+                    <h3>予測候補</h3>
+                    <div id="suggestionList">
+                        <p style="color: #888; text-align: center;">描き始めると表示されます</p>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button class="clear-btn" onclick="clearCanvas()">🗑️ クリア</button>
+                    <button class="save-btn" onclick="saveDrawing()">💾 保存</button>
+                </div>
+
+                <div class="panel" style="margin-top: 20px; padding: 15px;">
+                    <h3 style="font-size: 14px;">ヒント</h3>
+                    <p style="font-size: 12px; color: #888; margin: 0;">
+                        シンプルな形を描くと認識されやすいです。<br>
+                        例: 猫、犬、車、家、花、太陽など
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const drawCanvas = document.getElementById('drawCanvas');
+        const drawCtx = drawCanvas.getContext('2d');
+        const topPrediction = document.getElementById('topPrediction');
+        const topConfidence = document.getElementById('topConfidence');
+        const suggestionList = document.getElementById('suggestionList');
+        const status = document.getElementById('status');
+        const brushSize = document.getElementById('brushSize');
+        const colorBtns = document.querySelectorAll('.color-btn');
+        const toolBtns = document.querySelectorAll('.tool-btn');
+
+        let classifier;
+        let isDrawing = false;
+        let currentColor = '#000000';
+        let currentTool = 'brush';
+        let lastX = 0;
+        let lastY = 0;
+        let strokeCount = 0;
+
+        // 色選択
+        colorBtns.forEach(btn => {
+            btn.onclick = () => {
+                colorBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentColor = btn.dataset.color;
+            };
+        });
+
+        // ツール選択
+        toolBtns.forEach(btn => {
+            btn.onclick = () => {
+                toolBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTool = btn.dataset.tool;
+            };
+        });
+
+        // キャンバスを白で初期化
+        function initCanvas() {
+            drawCtx.fillStyle = 'white';
+            drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
+        }
+        initCanvas();
+
+        // 描画イベント
+        drawCanvas.onmousedown = (e) => {
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        };
+
+        drawCanvas.onmousemove = (e) => {
+            if (!isDrawing) return;
+
+            drawCtx.beginPath();
+            drawCtx.moveTo(lastX, lastY);
+            drawCtx.lineTo(e.offsetX, e.offsetY);
+
+            if (currentTool === 'eraser') {
+                drawCtx.strokeStyle = 'white';
+                drawCtx.lineWidth = brushSize.value * 3;
+            } else {
+                drawCtx.strokeStyle = currentColor;
+                drawCtx.lineWidth = brushSize.value;
+            }
+
+            drawCtx.lineCap = 'round';
+            drawCtx.stroke();
+
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        };
+
+        drawCanvas.onmouseup = () => {
+            if (isDrawing) {
+                isDrawing = false;
+                strokeCount++;
+                classifyDrawing();
+            }
+        };
+
+        drawCanvas.onmouseleave = () => {
+            if (isDrawing) {
+                isDrawing = false;
+                strokeCount++;
+                classifyDrawing();
+            }
+        };
+
+        // タッチ対応
+        drawCanvas.ontouchstart = (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = drawCanvas.getBoundingClientRect();
+            isDrawing = true;
+            lastX = touch.clientX - rect.left;
+            lastY = touch.clientY - rect.top;
+        };
+
+        drawCanvas.ontouchmove = (e) => {
+            e.preventDefault();
+            if (!isDrawing) return;
+            const touch = e.touches[0];
+            const rect = drawCanvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+
+            drawCtx.beginPath();
+            drawCtx.moveTo(lastX, lastY);
+            drawCtx.lineTo(x, y);
+            drawCtx.strokeStyle = currentTool === 'eraser' ? 'white' : currentColor;
+            drawCtx.lineWidth = currentTool === 'eraser' ? brushSize.value * 3 : brushSize.value;
+            drawCtx.lineCap = 'round';
+            drawCtx.stroke();
+
+            lastX = x;
+            lastY = y;
+        };
+
+        drawCanvas.ontouchend = () => {
+            if (isDrawing) {
+                isDrawing = false;
+                strokeCount++;
+                classifyDrawing();
+            }
+        };
+
+        // 分類器を初期化
+        async function initClassifier() {
+            status.textContent = 'AIを読み込み中...';
+            classifier = await ml5.imageClassifier('MobileNet');
+            status.textContent = '準備完了！描き始めてください';
+        }
+
+        // 描画を分類
+        async function classifyDrawing() {
+            if (!classifier) return;
+            if (strokeCount < 2) {
+                status.textContent = 'もう少し描いてください...';
+                return;
+            }
+
+            status.textContent = '分析中...';
+
+            try {
+                const results = await classifier.classify(drawCanvas, 5);
+                displayResults(results);
+            } catch (error) {
+                status.textContent = 'エラーが発生しました';
+            }
+        }
+
+        function displayResults(results) {
+            if (!results || results.length === 0) {
+                status.textContent = '認識できませんでした';
+                return;
+            }
+
+            // トップ予測
+            const top = results[0];
+            const label = top.label.split(',')[0];
+            topPrediction.textContent = label;
+            topConfidence.textContent = `確信度: ${(top.confidence * 100).toFixed(1)}%`;
+
+            // 候補リスト
+            suggestionList.innerHTML = results.slice(0, 5).map(r => {
+                const label = r.label.split(',')[0];
+                const confidence = (r.confidence * 100).toFixed(1);
+                return `
+                    <div class="suggestion-item">
+                        <span>${label}</span>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <div class="suggestion-bar">
+                                <div class="suggestion-fill" style="width: ${confidence}%"></div>
+                            </div>
+                            <span style="font-size: 12px; color: #888;">${confidence}%</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            status.textContent = `「${label}」に見えます`;
+        }
+
+        function clearCanvas() {
+            initCanvas();
+            strokeCount = 0;
+            topPrediction.textContent = '?';
+            topConfidence.textContent = '描いてください';
+            suggestionList.innerHTML = '<p style="color: #888; text-align: center;">描き始めると表示されます</p>';
+            status.textContent = '描き始めるとAIが予測します';
+        }
+
+        function saveDrawing() {
+            const link = document.createElement('a');
+            link.download = 'my-drawing.png';
+            link.href = drawCanvas.toDataURL();
+            link.click();
+        }
+
+        // 初期化
+        initClassifier();
+    </script>
+</body>
+</html>

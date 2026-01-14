@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>30 - 総合AIインタラクティブ体験</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #0a0a0a; color: white; min-height: 100vh; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; text-align: center; }
+        .header h1 { margin: 0; font-size: 28px; }
+        .header p { margin: 10px 0 0; opacity: 0.8; }
+
+        .main-container { display: grid; grid-template-columns: 1fr 320px; gap: 0; min-height: calc(100vh - 100px); }
+        @media (max-width: 1000px) { .main-container { grid-template-columns: 1fr; } }
+
+        .canvas-area { position: relative; background: #111; display: flex; justify-content: center; align-items: center; }
+        #mainCanvas { max-width: 100%; max-height: 100%; }
+
+        .sidebar { background: #1a1a2e; padding: 20px; overflow-y: auto; max-height: calc(100vh - 100px); }
+        .panel { background: #16213e; padding: 15px; border-radius: 12px; margin-bottom: 15px; }
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .panel-title { font-size: 14px; color: #667eea; font-weight: bold; }
+        .panel-toggle { background: none; border: none; color: #667eea; cursor: pointer; font-size: 18px; }
+
+        .mode-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 15px; }
+        .mode-btn { padding: 12px 8px; border: 2px solid #333; border-radius: 8px; background: transparent; color: white; cursor: pointer; font-size: 11px; transition: all 0.3s; text-align: center; }
+        .mode-btn:hover { border-color: #667eea; }
+        .mode-btn.active { background: #667eea; border-color: #667eea; }
+        .mode-icon { font-size: 24px; display: block; margin-bottom: 5px; }
+
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .stat-item { background: #0f3460; padding: 12px; border-radius: 8px; text-align: center; }
+        .stat-value { font-size: 20px; font-weight: bold; color: #4ecca3; }
+        .stat-label { font-size: 10px; color: #888; margin-top: 3px; }
+
+        .detection-list { max-height: 150px; overflow-y: auto; }
+        .detection-item { padding: 8px; background: #0f3460; border-radius: 6px; margin-bottom: 6px; font-size: 12px; display: flex; justify-content: space-between; }
+
+        .effect-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+        .effect-btn { padding: 8px; border: 1px solid #333; border-radius: 6px; background: transparent; color: white; cursor: pointer; font-size: 18px; transition: all 0.3s; }
+        .effect-btn:hover { border-color: #667eea; }
+        .effect-btn.active { background: #667eea; }
+
+        .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; }
+        .loading-spinner { width: 60px; height: 60px; border: 4px solid #333; border-top-color: #667eea; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 20px; color: #667eea; }
+        .loading-progress { width: 200px; height: 6px; background: #333; border-radius: 3px; margin-top: 15px; overflow: hidden; }
+        .loading-bar { height: 100%; background: #667eea; transition: width 0.3s; }
+
+        #status { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(102, 126, 234, 0.9); padding: 10px 20px; border-radius: 20px; font-size: 14px; z-index: 100; }
+    </style>
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loadingText">AIモデルを読み込み中...</div>
+        <div class="loading-progress">
+            <div class="loading-bar" id="loadingBar" style="width: 0%"></div>
+        </div>
+    </div>
+
+    <div class="header">
+        <h1>🤖 AI インタラクティブ体験</h1>
+        <p>複数のAIモデルを組み合わせた総合体験</p>
+    </div>
+
+    <div class="main-container">
+        <div class="canvas-area">
+            <canvas id="mainCanvas" width="640" height="480"></canvas>
+        </div>
+
+        <div class="sidebar">
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">🎮 モード選択</span>
+                </div>
+                <div class="mode-selector">
+                    <button class="mode-btn active" data-mode="bodypose" onclick="setMode('bodypose')">
+                        <span class="mode-icon">🧍</span>ボディ
+                    </button>
+                    <button class="mode-btn" data-mode="handpose" onclick="setMode('handpose')">
+                        <span class="mode-icon">✋</span>ハンド
+                    </button>
+                    <button class="mode-btn" data-mode="facemesh" onclick="setMode('facemesh')">
+                        <span class="mode-icon">😊</span>フェイス
+                    </button>
+                    <button class="mode-btn" data-mode="combined" onclick="setMode('combined')">
+                        <span class="mode-icon">🔮</span>全部
+                    </button>
+                    <button class="mode-btn" data-mode="particles" onclick="setMode('particles')">
+                        <span class="mode-icon">✨</span>パーティクル
+                    </button>
+                    <button class="mode-btn" data-mode="mirror" onclick="setMode('mirror')">
+                        <span class="mode-icon">🪞</span>ミラー
+                    </button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">📊 検出状況</span>
+                </div>
+                <div class="stat-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="bodyCount">0</div>
+                        <div class="stat-label">ボディ</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="handCount">0</div>
+                        <div class="stat-label">ハンド</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="faceCount">0</div>
+                        <div class="stat-label">フェイス</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="fps">0</div>
+                        <div class="stat-label">FPS</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">🎨 エフェクト</span>
+                </div>
+                <div class="effect-grid">
+                    <button class="effect-btn active" data-effect="none" onclick="setEffect('none')">❌</button>
+                    <button class="effect-btn" data-effect="neon" onclick="setEffect('neon')">💡</button>
+                    <button class="effect-btn" data-effect="rainbow" onclick="setEffect('rainbow')">🌈</button>
+                    <button class="effect-btn" data-effect="fire" onclick="setEffect('fire')">🔥</button>
+                    <button class="effect-btn" data-effect="ice" onclick="setEffect('ice')">❄️</button>
+                    <button class="effect-btn" data-effect="matrix" onclick="setEffect('matrix')">💚</button>
+                    <button class="effect-btn" data-effect="ghost" onclick="setEffect('ghost')">👻</button>
+                    <button class="effect-btn" data-effect="pixelate" onclick="setEffect('pixelate')">🔲</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">🔍 検出詳細</span>
+                </div>
+                <div class="detection-list" id="detectionList">
+                    <div class="detection-item">
+                        <span>待機中...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" style="display: none;">準備完了</div>
+
+    <script>
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+        const loadingBar = document.getElementById('loadingBar');
+        const statusDiv = document.getElementById('status');
+
+        let video;
+        let bodyPose, handPose, faceMesh;
+        let poses = [], hands = [], faces = [];
+
+        let currentMode = 'bodypose';
+        let currentEffect = 'none';
+        let particles = [];
+        let frameCount = 0;
+        let lastFpsTime = Date.now();
+        let fps = 0;
+
+        // 色パレット
+        const colors = {
+            neon: ['#ff00ff', '#00ffff', '#ffff00', '#ff0080'],
+            rainbow: ['#ff0000', '#ff8000', '#ffff00', '#00ff00', '#00ffff', '#0080ff', '#8000ff'],
+            fire: ['#ff0000', '#ff4400', '#ff8800', '#ffcc00'],
+            ice: ['#00ffff', '#0088ff', '#0044ff', '#88ffff'],
+            matrix: ['#00ff00', '#008800', '#004400'],
+            ghost: ['rgba(255,255,255,0.3)', 'rgba(200,200,255,0.2)']
+        };
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            loadingText.textContent = 'BodyPoseを読み込み中...';
+            loadingBar.style.width = '20%';
+            bodyPose = await ml5.bodyPose('MoveNet');
+
+            loadingText.textContent = 'HandPoseを読み込み中...';
+            loadingBar.style.width = '50%';
+            handPose = await ml5.handPose();
+
+            loadingText.textContent = 'FaceMeshを読み込み中...';
+            loadingBar.style.width = '80%';
+            faceMesh = await ml5.faceMesh();
+
+            loadingBar.style.width = '100%';
+            loadingText.textContent = '準備完了！';
+
+            setTimeout(() => {
+                loadingOverlay.style.display = 'none';
+                showStatus('AIモデルの読み込み完了！');
+            }, 500);
+
+            detectAll();
+            animate();
+        }
+
+        async function detectAll() {
+            // 選択されたモードに応じて検出
+            if (currentMode === 'bodypose' || currentMode === 'combined' || currentMode === 'particles') {
+                poses = await bodyPose.detect(video);
+            }
+            if (currentMode === 'handpose' || currentMode === 'combined') {
+                hands = await handPose.detect(video);
+            }
+            if (currentMode === 'facemesh' || currentMode === 'combined') {
+                faces = await faceMesh.detect(video);
+            }
+
+            updateStats();
+            requestAnimationFrame(detectAll);
+        }
+
+        function animate() {
+            draw();
+            calculateFps();
+            requestAnimationFrame(animate);
+        }
+
+        function calculateFps() {
+            frameCount++;
+            const now = Date.now();
+            if (now - lastFpsTime >= 1000) {
+                fps = frameCount;
+                frameCount = 0;
+                lastFpsTime = now;
+                document.getElementById('fps').textContent = fps;
+            }
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            showStatus(`モード: ${mode}`);
+        }
+
+        function setEffect(effect) {
+            currentEffect = effect;
+            document.querySelectorAll('.effect-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.effect === effect);
+            });
+        }
+
+        function updateStats() {
+            document.getElementById('bodyCount').textContent = poses.length;
+            document.getElementById('handCount').textContent = hands.length;
+            document.getElementById('faceCount').textContent = faces.length;
+
+            // 検出詳細
+            const detections = [];
+            if (poses.length > 0) detections.push({ type: '🧍 ボディ', count: poses.length });
+            if (hands.length > 0) detections.push({ type: '✋ ハンド', count: hands.length });
+            if (faces.length > 0) detections.push({ type: '😊 フェイス', count: faces.length });
+
+            const list = document.getElementById('detectionList');
+            if (detections.length > 0) {
+                list.innerHTML = detections.map(d =>
+                    `<div class="detection-item"><span>${d.type}</span><span>${d.count}検出</span></div>`
+                ).join('');
+            } else {
+                list.innerHTML = '<div class="detection-item"><span>検出なし</span></div>';
+            }
+        }
+
+        function showStatus(message) {
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            setTimeout(() => statusDiv.style.display = 'none', 2000);
+        }
+
+        function getEffectColor(index) {
+            const palette = colors[currentEffect] || ['#ffffff'];
+            return palette[index % palette.length];
+        }
+
+        function draw() {
+            // 背景
+            if (currentEffect === 'ghost') {
+                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else {
+                ctx.save();
+                ctx.scale(-1, 1);
+                ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+
+            // エフェクト適用
+            if (currentEffect === 'pixelate') {
+                applyPixelate();
+            }
+
+            // モードに応じた描画
+            switch (currentMode) {
+                case 'bodypose':
+                    drawBodyPose();
+                    break;
+                case 'handpose':
+                    drawHandPose();
+                    break;
+                case 'facemesh':
+                    drawFaceMesh();
+                    break;
+                case 'combined':
+                    drawBodyPose();
+                    drawHandPose();
+                    drawFaceMesh();
+                    break;
+                case 'particles':
+                    updateParticles();
+                    drawParticles();
+                    break;
+                case 'mirror':
+                    drawMirrorEffect();
+                    break;
+            }
+        }
+
+        function drawBodyPose() {
+            if (poses.length === 0) return;
+
+            const pose = poses[0];
+            const connections = [
+                ['left_shoulder', 'right_shoulder'],
+                ['left_shoulder', 'left_elbow'], ['left_elbow', 'left_wrist'],
+                ['right_shoulder', 'right_elbow'], ['right_elbow', 'right_wrist'],
+                ['left_shoulder', 'left_hip'], ['right_shoulder', 'right_hip'],
+                ['left_hip', 'right_hip'],
+                ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
+                ['right_hip', 'right_knee'], ['right_knee', 'right_ankle']
+            ];
+
+            ctx.lineWidth = currentEffect === 'neon' ? 6 : 3;
+
+            connections.forEach((conn, i) => {
+                const start = pose.keypoints.find(k => k.name === conn[0]);
+                const end = pose.keypoints.find(k => k.name === conn[1]);
+                if (start && end && start.confidence > 0.3 && end.confidence > 0.3) {
+                    ctx.strokeStyle = getEffectColor(i);
+                    if (currentEffect === 'neon') {
+                        ctx.shadowColor = ctx.strokeStyle;
+                        ctx.shadowBlur = 20;
+                    }
+                    ctx.beginPath();
+                    ctx.moveTo(canvas.width - start.x, start.y);
+                    ctx.lineTo(canvas.width - end.x, end.y);
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+            });
+
+            pose.keypoints.forEach((kp, i) => {
+                if (kp.confidence > 0.3) {
+                    ctx.beginPath();
+                    ctx.arc(canvas.width - kp.x, kp.y, 8, 0, 2 * Math.PI);
+                    ctx.fillStyle = getEffectColor(i);
+                    ctx.fill();
+                }
+            });
+        }
+
+        function drawHandPose() {
+            hands.forEach((hand, hi) => {
+                const fingerConns = [[0,1,2,3,4], [0,5,6,7,8], [0,9,10,11,12], [0,13,14,15,16], [0,17,18,19,20]];
+
+                ctx.lineWidth = 3;
+                fingerConns.forEach((finger, fi) => {
+                    ctx.strokeStyle = getEffectColor(hi * 5 + fi);
+                    ctx.beginPath();
+                    finger.forEach((idx, i) => {
+                        const kp = hand.keypoints[idx];
+                        const x = canvas.width - kp.x;
+                        if (i === 0) ctx.moveTo(x, kp.y);
+                        else ctx.lineTo(x, kp.y);
+                    });
+                    ctx.stroke();
+                });
+
+                hand.keypoints.forEach((kp, i) => {
+                    ctx.beginPath();
+                    ctx.arc(canvas.width - kp.x, kp.y, [4,8,12,16,20].includes(i) ? 8 : 4, 0, 2 * Math.PI);
+                    ctx.fillStyle = getEffectColor(hi * 21 + i);
+                    ctx.fill();
+                });
+            });
+        }
+
+        function drawFaceMesh() {
+            faces.forEach((face, fi) => {
+                ctx.fillStyle = getEffectColor(fi);
+                face.keypoints.forEach(kp => {
+                    ctx.beginPath();
+                    ctx.arc(canvas.width - kp.x, kp.y, 1.5, 0, 2 * Math.PI);
+                    ctx.fill();
+                });
+            });
+        }
+
+        function updateParticles() {
+            // ポーズから手首の位置を取得してパーティクル生成
+            if (poses.length > 0) {
+                const pose = poses[0];
+                ['left_wrist', 'right_wrist'].forEach(name => {
+                    const kp = pose.keypoints.find(k => k.name === name);
+                    if (kp && kp.confidence > 0.3) {
+                        for (let i = 0; i < 3; i++) {
+                            particles.push({
+                                x: canvas.width - kp.x,
+                                y: kp.y,
+                                vx: (Math.random() - 0.5) * 4,
+                                vy: (Math.random() - 0.5) * 4 - 2,
+                                life: 60,
+                                color: getEffectColor(Math.floor(Math.random() * 7))
+                            });
+                        }
+                    }
+                });
+            }
+
+            // パーティクル更新
+            particles = particles.filter(p => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.1; // 重力
+                p.life--;
+                return p.life > 0;
+            });
+
+            // 最大数制限
+            if (particles.length > 500) particles = particles.slice(-500);
+        }
+
+        function drawParticles() {
+            drawBodyPose();
+            particles.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life / 60;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            });
+        }
+
+        function drawMirrorEffect() {
+            // 4分割ミラー
+            ctx.save();
+            ctx.scale(-0.5, 0.5);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.scale(-2, 1);
+            ctx.drawImage(video, 0, 0, canvas.width / 2, canvas.height / 2);
+            ctx.restore();
+
+            ctx.save();
+            ctx.translate(0, canvas.height);
+            ctx.scale(0.5, -0.5);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.scale(1, 1);
+            ctx.drawImage(video, canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+        }
+
+        function applyPixelate() {
+            const size = 10;
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+
+            for (let y = 0; y < canvas.height; y += size) {
+                for (let x = 0; x < canvas.width; x += size) {
+                    const idx = (y * canvas.width + x) * 4;
+                    const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.fillRect(x, y, size, size);
+                }
+            }
+        }
+
+        setup();
+    </script>
+</body>
+</html>

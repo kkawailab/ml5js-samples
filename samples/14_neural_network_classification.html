@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>14 - Neural Network 色分類</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #1a1a2e; color: white; }
+        .container { max-width: 600px; margin: 0 auto; }
+        #colorDisplay { width: 200px; height: 200px; margin: 20px auto; border-radius: 50%; border: 5px solid white; }
+        .controls { margin: 20px 0; }
+        input[type="range"] { width: 100%; margin: 10px 0; }
+        .label-section { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 20px 0; }
+        .label-btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; transition: all 0.3s; }
+        .label-btn:hover { transform: scale(1.05); }
+        button { padding: 12px 24px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; margin: 5px; }
+        .train-btn { background: #4ecca3; color: #1a1a2e; }
+        .predict-btn { background: #667eea; color: white; }
+        #result { font-size: 24px; margin: 20px 0; padding: 20px; background: #16213e; border-radius: 10px; }
+        #status { color: #4ecca3; margin: 10px 0; }
+        #dataCount { font-size: 14px; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Neural Network - 色分類</h1>
+        <p>RGBの値から色の名前を予測するニューラルネットワークを訓練しよう</p>
+
+        <div id="colorDisplay"></div>
+
+        <div class="controls">
+            <label>R: <span id="rValue">128</span></label>
+            <input type="range" id="rSlider" min="0" max="255" value="128">
+
+            <label>G: <span id="gValue">128</span></label>
+            <input type="range" id="gSlider" min="0" max="255" value="128">
+
+            <label>B: <span id="bValue">128</span></label>
+            <input type="range" id="bSlider" min="0" max="255" value="128">
+        </div>
+
+        <div class="label-section">
+            <button class="label-btn" style="background: #ff6b6b" onclick="addData('赤系')">赤系</button>
+            <button class="label-btn" style="background: #feca57" onclick="addData('黄系')">黄系</button>
+            <button class="label-btn" style="background: #48dbfb" onclick="addData('青系')">青系</button>
+            <button class="label-btn" style="background: #1dd1a1" onclick="addData('緑系')">緑系</button>
+            <button class="label-btn" style="background: #ff9ff3" onclick="addData('ピンク系')">ピンク系</button>
+            <button class="label-btn" style="background: #9b59b6" onclick="addData('紫系')">紫系</button>
+        </div>
+
+        <div id="dataCount">訓練データ: 0件</div>
+
+        <button class="train-btn" onclick="trainModel()">訓練開始</button>
+        <button class="predict-btn" onclick="predict()">予測</button>
+
+        <div id="status">データを追加してください</div>
+        <div id="result">-</div>
+    </div>
+
+    <script>
+        const colorDisplay = document.getElementById('colorDisplay');
+        const rSlider = document.getElementById('rSlider');
+        const gSlider = document.getElementById('gSlider');
+        const bSlider = document.getElementById('bSlider');
+        const rValue = document.getElementById('rValue');
+        const gValue = document.getElementById('gValue');
+        const bValue = document.getElementById('bValue');
+        const status = document.getElementById('status');
+        const result = document.getElementById('result');
+        const dataCount = document.getElementById('dataCount');
+
+        let nn;
+        let trainingData = [];
+
+        // ニューラルネットワークを初期化
+        function initNN() {
+            const options = {
+                inputs: ['r', 'g', 'b'],
+                outputs: ['label'],
+                task: 'classification'
+            };
+            nn = ml5.neuralNetwork(options);
+        }
+        initNN();
+
+        // スライダーの更新
+        function updateColor() {
+            const r = rSlider.value;
+            const g = gSlider.value;
+            const b = bSlider.value;
+            rValue.textContent = r;
+            gValue.textContent = g;
+            bValue.textContent = b;
+            colorDisplay.style.background = `rgb(${r}, ${g}, ${b})`;
+        }
+
+        rSlider.oninput = updateColor;
+        gSlider.oninput = updateColor;
+        bSlider.oninput = updateColor;
+        updateColor();
+
+        // 訓練データを追加
+        function addData(label) {
+            const r = parseInt(rSlider.value) / 255;
+            const g = parseInt(gSlider.value) / 255;
+            const b = parseInt(bSlider.value) / 255;
+
+            nn.addData({ r, g, b }, { label });
+            trainingData.push({ r, g, b, label });
+
+            dataCount.textContent = `訓練データ: ${trainingData.length}件`;
+            status.textContent = `「${label}」のデータを追加しました`;
+
+            // ランダムに色を変更
+            rSlider.value = Math.floor(Math.random() * 256);
+            gSlider.value = Math.floor(Math.random() * 256);
+            bSlider.value = Math.floor(Math.random() * 256);
+            updateColor();
+        }
+
+        // モデルを訓練
+        async function trainModel() {
+            if (trainingData.length < 10) {
+                status.textContent = '少なくとも10件のデータが必要です';
+                return;
+            }
+
+            status.textContent = '訓練中...';
+
+            nn.normalizeData();
+
+            await nn.train({ epochs: 50 }, (epoch, loss) => {
+                if (epoch % 10 === 0) {
+                    status.textContent = `訓練中... エポック: ${epoch}, 損失: ${loss.loss.toFixed(4)}`;
+                }
+            });
+
+            status.textContent = '訓練完了！予測ボタンを押してください';
+        }
+
+        // 予測
+        async function predict() {
+            const r = parseInt(rSlider.value) / 255;
+            const g = parseInt(gSlider.value) / 255;
+            const b = parseInt(bSlider.value) / 255;
+
+            try {
+                const results = await nn.classify({ r, g, b });
+                result.innerHTML = `
+                    <div>予測: <strong>${results[0].label}</strong></div>
+                    <div style="font-size: 16px; color: #888;">確信度: ${(results[0].confidence * 100).toFixed(1)}%</div>
+                `;
+            } catch (error) {
+                result.textContent = 'まず訓練を行ってください';
+            }
+        }
+    </script>
+</body>
+</html>

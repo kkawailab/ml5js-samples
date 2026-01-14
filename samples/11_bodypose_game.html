@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>11 - BodyPose フルーツキャッチゲーム</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #0d1117; color: white; margin: 0; }
+        #gameContainer { position: relative; display: inline-block; }
+        canvas { border-radius: 10px; }
+        #ui { position: absolute; top: 10px; left: 10px; text-align: left; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 10px; }
+        .score { font-size: 24px; color: #58a6ff; }
+        .lives { font-size: 20px; color: #f85149; }
+        #gameOver { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); padding: 40px; border-radius: 20px; }
+        button { padding: 15px 30px; font-size: 18px; border: none; border-radius: 10px; cursor: pointer; background: #238636; color: white; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>フルーツキャッチゲーム</h1>
+    <p>手を動かしてフルーツをキャッチしよう！</p>
+
+    <div id="gameContainer">
+        <canvas id="canvas"></canvas>
+        <div id="ui">
+            <div class="score">スコア: <span id="score">0</span></div>
+            <div class="lives">ライフ: <span id="lives">❤️❤️❤️</span></div>
+        </div>
+        <div id="gameOver">
+            <h2>ゲームオーバー</h2>
+            <p>最終スコア: <span id="finalScore">0</span></p>
+            <button onclick="restartGame()">もう一度プレイ</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const scoreSpan = document.getElementById('score');
+        const livesSpan = document.getElementById('lives');
+        const gameOverDiv = document.getElementById('gameOver');
+        const finalScoreSpan = document.getElementById('finalScore');
+
+        canvas.width = 640;
+        canvas.height = 480;
+
+        let video;
+        let bodyPose;
+        let poses = [];
+        let fruits = [];
+        let score = 0;
+        let lives = 3;
+        let gameRunning = true;
+
+        const fruitEmojis = ['🍎', '🍊', '🍋', '🍇', '🍓', '🍑', '🍒'];
+
+        class Fruit {
+            constructor() {
+                this.x = Math.random() * (canvas.width - 60) + 30;
+                this.y = -50;
+                this.speed = 2 + Math.random() * 3;
+                this.emoji = fruitEmojis[Math.floor(Math.random() * fruitEmojis.length)];
+                this.size = 40;
+            }
+
+            update() {
+                this.y += this.speed;
+            }
+
+            draw() {
+                ctx.font = `${this.size}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(this.emoji, this.x, this.y);
+            }
+        }
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet');
+            detectPose();
+            gameLoop();
+            spawnFruits();
+        }
+
+        async function detectPose() {
+            poses = await bodyPose.detect(video);
+            if (gameRunning) {
+                requestAnimationFrame(detectPose);
+            }
+        }
+
+        function spawnFruits() {
+            if (!gameRunning) return;
+            fruits.push(new Fruit());
+            setTimeout(spawnFruits, 1000 + Math.random() * 1000);
+        }
+
+        function getHands() {
+            if (poses.length === 0) return [];
+            const pose = poses[0];
+            const hands = [];
+            const leftWrist = pose.keypoints.find(k => k.name === 'left_wrist');
+            const rightWrist = pose.keypoints.find(k => k.name === 'right_wrist');
+            if (leftWrist && leftWrist.confidence > 0.3) {
+                hands.push({ x: canvas.width - leftWrist.x, y: leftWrist.y });
+            }
+            if (rightWrist && rightWrist.confidence > 0.3) {
+                hands.push({ x: canvas.width - rightWrist.x, y: rightWrist.y });
+            }
+            return hands;
+        }
+
+        function checkCollision(fruit, hands) {
+            for (let hand of hands) {
+                const dist = Math.sqrt((fruit.x - hand.x) ** 2 + (fruit.y - hand.y) ** 2);
+                if (dist < 60) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function updateLives() {
+            livesSpan.textContent = '❤️'.repeat(lives);
+        }
+
+        function gameLoop() {
+            if (!gameRunning) return;
+
+            // ビデオを描画
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            const hands = getHands();
+
+            // 手を描画
+            ctx.fillStyle = 'rgba(88, 166, 255, 0.5)';
+            for (let hand of hands) {
+                ctx.beginPath();
+                ctx.arc(hand.x, hand.y, 40, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+
+            // フルーツを更新・描画
+            for (let i = fruits.length - 1; i >= 0; i--) {
+                const fruit = fruits[i];
+                fruit.update();
+                fruit.draw();
+
+                // キャッチ判定
+                if (checkCollision(fruit, hands)) {
+                    score += 10;
+                    scoreSpan.textContent = score;
+                    fruits.splice(i, 1);
+                    continue;
+                }
+
+                // 画面外に落ちた
+                if (fruit.y > canvas.height + 50) {
+                    fruits.splice(i, 1);
+                    lives--;
+                    updateLives();
+                    if (lives <= 0) {
+                        endGame();
+                        return;
+                    }
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function endGame() {
+            gameRunning = false;
+            finalScoreSpan.textContent = score;
+            gameOverDiv.style.display = 'block';
+        }
+
+        function restartGame() {
+            score = 0;
+            lives = 3;
+            fruits = [];
+            scoreSpan.textContent = '0';
+            updateLives();
+            gameOverDiv.style.display = 'none';
+            gameRunning = true;
+            detectPose();
+            gameLoop();
+            spawnFruits();
+        }
+
+        setup();
+    </script>
+</body>
+</html>

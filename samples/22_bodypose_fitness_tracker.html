@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>22 - BodyPose フィットネストラッカー</title>
+    <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #0d1117; color: white; }
+        .app { display: grid; grid-template-columns: 1fr 320px; min-height: 100vh; }
+        @media (max-width: 900px) { .app { grid-template-columns: 1fr; } }
+
+        .main { padding: 20px; }
+        canvas { width: 100%; max-width: 640px; border-radius: 15px; display: block; margin: 0 auto; }
+
+        .sidebar { background: #161b22; padding: 20px; }
+        .sidebar h2 { margin-top: 0; color: #58a6ff; font-size: 18px; }
+
+        .exercise-selector { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .exercise-btn { padding: 15px; border: 2px solid #30363d; border-radius: 10px; background: transparent; color: white; cursor: pointer; transition: all 0.3s; font-size: 12px; }
+        .exercise-btn:hover { border-color: #58a6ff; }
+        .exercise-btn.active { background: #238636; border-color: #238636; }
+        .exercise-icon { font-size: 24px; display: block; margin-bottom: 5px; }
+
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #21262d; padding: 15px; border-radius: 10px; text-align: center; }
+        .stat-value { font-size: 36px; font-weight: bold; color: #58a6ff; }
+        .stat-label { font-size: 12px; color: #8b949e; }
+
+        .form-indicator { background: #21262d; border-radius: 10px; padding: 15px; margin-bottom: 20px; }
+        .form-title { font-size: 14px; color: #8b949e; margin-bottom: 10px; }
+        .form-bar { height: 20px; background: #30363d; border-radius: 10px; overflow: hidden; }
+        .form-fill { height: 100%; transition: width 0.3s, background 0.3s; }
+        .form-feedback { margin-top: 10px; font-size: 14px; min-height: 40px; }
+
+        .workout-log { max-height: 200px; overflow-y: auto; }
+        .log-item { padding: 10px; background: #21262d; border-radius: 8px; margin-bottom: 8px; font-size: 12px; display: flex; justify-content: space-between; }
+
+        button { padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; }
+        .reset-btn { background: #f85149; color: white; width: 100%; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <div class="main">
+            <canvas id="canvas" width="640" height="480"></canvas>
+        </div>
+
+        <div class="sidebar">
+            <h2>エクササイズを選択</h2>
+            <div class="exercise-selector">
+                <button class="exercise-btn active" data-exercise="squat" onclick="selectExercise('squat')">
+                    <span class="exercise-icon">🏋️</span>
+                    スクワット
+                </button>
+                <button class="exercise-btn" data-exercise="jumping_jack" onclick="selectExercise('jumping_jack')">
+                    <span class="exercise-icon">🤸</span>
+                    ジャンピングジャック
+                </button>
+                <button class="exercise-btn" data-exercise="arm_raise" onclick="selectExercise('arm_raise')">
+                    <span class="exercise-icon">💪</span>
+                    アームレイズ
+                </button>
+                <button class="exercise-btn" data-exercise="high_knees" onclick="selectExercise('high_knees')">
+                    <span class="exercise-icon">🦵</span>
+                    ハイニー
+                </button>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="repCount">0</div>
+                    <div class="stat-label">回数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="calorieCount">0</div>
+                    <div class="stat-label">カロリー</div>
+                </div>
+            </div>
+
+            <div class="form-indicator">
+                <div class="form-title">フォーム品質</div>
+                <div class="form-bar">
+                    <div class="form-fill" id="formFill" style="width: 0%; background: #4ecca3;"></div>
+                </div>
+                <div class="form-feedback" id="formFeedback">ポーズを検出中...</div>
+            </div>
+
+            <h2>ワークアウトログ</h2>
+            <div class="workout-log" id="workoutLog"></div>
+
+            <button class="reset-btn" onclick="resetWorkout()">リセット</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const repCount = document.getElementById('repCount');
+        const calorieCount = document.getElementById('calorieCount');
+        const formFill = document.getElementById('formFill');
+        const formFeedback = document.getElementById('formFeedback');
+        const workoutLog = document.getElementById('workoutLog');
+
+        let video;
+        let bodyPose;
+        let poses = [];
+
+        let currentExercise = 'squat';
+        let reps = 0;
+        let calories = 0;
+        let inPosition = false;
+        let lastState = null;
+
+        const caloriesPerRep = { squat: 0.32, jumping_jack: 0.2, arm_raise: 0.15, high_knees: 0.25 };
+
+        const exerciseNames = { squat: 'スクワット', jumping_jack: 'ジャンピングジャック', arm_raise: 'アームレイズ', high_knees: 'ハイニー' };
+
+        function selectExercise(exercise) {
+            currentExercise = exercise;
+            document.querySelectorAll('.exercise-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.exercise === exercise);
+            });
+            addLog(`${exerciseNames[exercise]}を開始`);
+        }
+
+        async function setup() {
+            video = document.createElement('video');
+            video.width = 640;
+            video.height = 480;
+
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = stream;
+            await video.play();
+
+            bodyPose = await ml5.bodyPose('MoveNet');
+            detectPose();
+        }
+
+        async function detectPose() {
+            poses = await bodyPose.detect(video);
+            analyzeExercise();
+            draw();
+            requestAnimationFrame(detectPose);
+        }
+
+        function getKeypoint(name) {
+            if (poses.length === 0) return null;
+            return poses[0].keypoints.find(k => k.name === name);
+        }
+
+        function calculateAngle(a, b, c) {
+            const radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+            let angle = Math.abs(radians * 180 / Math.PI);
+            if (angle > 180) angle = 360 - angle;
+            return angle;
+        }
+
+        function analyzeExercise() {
+            if (poses.length === 0) {
+                formFeedback.textContent = 'ポーズを検出中...';
+                formFill.style.width = '0%';
+                return;
+            }
+
+            let formQuality = 0;
+            let feedback = '';
+            let currentState = null;
+
+            switch (currentExercise) {
+                case 'squat':
+                    const leftHip = getKeypoint('left_hip');
+                    const leftKnee = getKeypoint('left_knee');
+                    const leftAnkle = getKeypoint('left_ankle');
+
+                    if (leftHip && leftKnee && leftAnkle) {
+                        const kneeAngle = calculateAngle(leftHip, leftKnee, leftAnkle);
+
+                        if (kneeAngle < 100) {
+                            currentState = 'down';
+                            formQuality = Math.min(100, (180 - kneeAngle) / 80 * 100);
+                            feedback = '良いスクワット！膝を曲げています';
+                        } else {
+                            currentState = 'up';
+                            formQuality = 50;
+                            feedback = '膝を曲げてスクワットしましょう';
+                        }
+                    }
+                    break;
+
+                case 'jumping_jack':
+                    const lWrist = getKeypoint('left_wrist');
+                    const rWrist = getKeypoint('right_wrist');
+                    const lShoulder = getKeypoint('left_shoulder');
+
+                    if (lWrist && rWrist && lShoulder) {
+                        const armsUp = lWrist.y < lShoulder.y && rWrist.y < lShoulder.y;
+                        if (armsUp) {
+                            currentState = 'open';
+                            formQuality = 100;
+                            feedback = '腕を上げています！';
+                        } else {
+                            currentState = 'closed';
+                            formQuality = 50;
+                            feedback = '腕を上げましょう';
+                        }
+                    }
+                    break;
+
+                case 'arm_raise':
+                    const leftWrist = getKeypoint('left_wrist');
+                    const rightWrist = getKeypoint('right_wrist');
+                    const leftShoulderAR = getKeypoint('left_shoulder');
+
+                    if (leftWrist && rightWrist && leftShoulderAR) {
+                        const armsRaised = leftWrist.y < leftShoulderAR.y - 50 && rightWrist.y < leftShoulderAR.y - 50;
+                        if (armsRaised) {
+                            currentState = 'up';
+                            formQuality = 100;
+                            feedback = '両腕を上げています！';
+                        } else {
+                            currentState = 'down';
+                            formQuality = 50;
+                            feedback = '両腕を頭上に上げましょう';
+                        }
+                    }
+                    break;
+
+                case 'high_knees':
+                    const leftKneeHK = getKeypoint('left_knee');
+                    const rightKnee = getKeypoint('right_knee');
+                    const leftHipHK = getKeypoint('left_hip');
+
+                    if (leftKneeHK && rightKnee && leftHipHK) {
+                        const leftHigh = leftKneeHK.y < leftHipHK.y;
+                        const rightHigh = rightKnee.y < leftHipHK.y;
+
+                        if (leftHigh || rightHigh) {
+                            currentState = 'up';
+                            formQuality = 100;
+                            feedback = '膝を高く上げています！';
+                        } else {
+                            currentState = 'down';
+                            formQuality = 50;
+                            feedback = '膝を腰の高さまで上げましょう';
+                        }
+                    }
+                    break;
+            }
+
+            // レップカウント
+            if (lastState && currentState && lastState !== currentState) {
+                if ((currentExercise === 'squat' && lastState === 'down' && currentState === 'up') ||
+                    (currentExercise === 'jumping_jack' && lastState === 'open' && currentState === 'closed') ||
+                    (currentExercise === 'arm_raise' && lastState === 'up' && currentState === 'down') ||
+                    (currentExercise === 'high_knees' && lastState === 'up' && currentState === 'down')) {
+                    reps++;
+                    calories += caloriesPerRep[currentExercise];
+                    repCount.textContent = reps;
+                    calorieCount.textContent = calories.toFixed(1);
+                }
+            }
+
+            lastState = currentState;
+
+            formFill.style.width = `${formQuality}%`;
+            formFill.style.background = formQuality > 70 ? '#4ecca3' : formQuality > 40 ? '#f39c12' : '#f85149';
+            formFeedback.textContent = feedback;
+        }
+
+        function addLog(message) {
+            const time = new Date().toLocaleTimeString();
+            const item = document.createElement('div');
+            item.className = 'log-item';
+            item.innerHTML = `<span>${message}</span><span>${time}</span>`;
+            workoutLog.insertBefore(item, workoutLog.firstChild);
+        }
+
+        function resetWorkout() {
+            reps = 0;
+            calories = 0;
+            repCount.textContent = '0';
+            calorieCount.textContent = '0';
+            workoutLog.innerHTML = '';
+            addLog('ワークアウトをリセット');
+        }
+
+        function draw() {
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+            ctx.restore();
+
+            if (poses.length > 0) {
+                const pose = poses[0];
+                for (let kp of pose.keypoints) {
+                    if (kp.confidence > 0.3) {
+                        ctx.beginPath();
+                        ctx.arc(canvas.width - kp.x, kp.y, 6, 0, 2 * Math.PI);
+                        ctx.fillStyle = '#4ecca3';
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // 現在のエクササイズ名を表示
+            ctx.font = 'bold 24px Arial';
+            ctx.fillStyle = 'white';
+            ctx.fillText(exerciseNames[currentExercise], 20, 40);
+
+            ctx.font = 'bold 48px Arial';
+            ctx.fillText(`${reps} 回`, 20, 90);
+        }
+
+        setup();
+    </script>
+</body>
+</html>
